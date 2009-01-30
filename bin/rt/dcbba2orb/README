@@ -1,0 +1,146 @@
+ipd2 README
+----------------------------------------------------------------------------
+
+Geoff Davis <gadavis@ucsd.edu>
+
+This is a description of the ipd2 program, written well after the fact. It's most likely erroneous and incomplete.
+
+Overview:
+ipd2 and it's companion program ucp2 were originally written back in 1992 by  Marina Harkins-Glushko. Both programs are designed to communicate with an IGPP data concentrator box (designed by Glen Offield). ipd2 is a daemon that connects to a TCP port on the concentrator, listens for packets, and writes those packets out to an orb specified on the command line. It's companion program ucp2 is a TCL/TK client that sends control packets to the concentrator box which then forwards those commands out to individual data loggers.
+
+----------------------------------------------------------------------------
+
+Input Packets to ipd2:
+ipd2 connects to port 5000 on the IGPP data concentrator (DC) and waits for data. It apparently has skeleton code to support opening a local file but it doesn't work.
+
+Typical invocation: default packet size is 4096 but as used on toro1-orb the -s parameter set that packet size to 16384. The default is also a silent minimum, ie the program won't let you go any lower but it doesn't really tell you that.
+
+----------------------------------------------------------------------------
+
+Output Packets from ipd2:
+ipd2 on toro1-orb outputs a number of different packets of type BBA. The library it's linked to, libdefunctpkt2, can read and output a variety of packets, but ipd2 seems to be limited to a fixed number of types
+
+----------------------------------------------------------------------------
+
+Bugs:
+openIP.c:open_IN_ports apparently makes the assumption that the IP address always starts with 3 digits followed by a dot. This of course breaks large chunks of the internet, such as 10. addresses.
+
+----------------------------------------------------------------------------
+
+Parameter files:
+ipd2 reads pkt.pf for configuration data. There are sections in pkt.pf that map serial numbers and channel numbers as reported by the data concentrator to Antelope NET_STA_CHAN/TYPE/SUBTYPE format
+
+----------------------------------------------------------------------------
+
+IGPP Data Concentrator:
+Originally designed by Glen Offield, the IGPP data concentrator talks to the various RefTek units that we have out in the field via Freewave radio and aggregates their data. It does not appear to do any sort of long term buffering, so if ipd2 is not connected to the concentrator, the data is lost.
+
+Output: According to ipd2.h the data port where ipd2 connects to is 5000
+Input: according to contrib/lib/rt/rtucp2/dccmd.c, the concentrator listens to port 5001 for commands
+
+----------------------------------------------------------------------------
+
+Input packet format:
+There are two classes of packets that ipd2 looks like it can support, but in reality the existing version of libdefunctpkt2 will only parse the first one beginning with 0xda. See the lookup table excerpt from lib/rt/pkjt2/pkts_init.c - none of the supported packet types begin with AB or BB
+
+|| Packet Class | DA    | B (not supported by libdefunctpkt2) |
+|| Sync Char    | 0xda  | 0xab or 0xbb  |
+|| PID Offset   | 10    | 6             |
+|| UID Offset   | 8     | 4             |
+|| PLEN Offset  | 2     | 2             |
+|| control_cnt  | 16    | 44            |
+
+Sync char should indicate the first byte of the packet
+control_cnt appears to be a hackish way to determine if it's safe to read the Packet ID and Packet Length. The program bails on the packet if packet length ends up being 0. Not sure if the DC has a habit of outputing short packets or what
+
+For both classes of packets, there is a second byte that determines the packet type.
+|| Hex code     || Description  || chsum_tag    ||
+|  0xab         |  data         |  0xDAAB       |
+|  0xbc         |  DAS Status   |  0xDABC       |
+|  0xcd         |  DC Status    |  0xDACD       |
+|  0xde         |  RTX status   |  0xDADE       |
+
+
+DA (aka "newbba") Packet format (from ../../../lib/rt/pkt2/pkttype.c)
+/* Here is new BBA data packet structure 
+
+struct pack_struct
+        { 
+        unsigned short sync;            -- Software sync pattern:
+                                        DAS Data   sync pattern 0xDAAB
+                                        DAS Status sync pattern 0xDABC
+                                        DC  Status sync pattern 0xDACD
+                                        RTX Status sync pattern 0xDADE 
+        unsigned short checksum;        -- block checksum 
+        unsigned short byte_count;      -- packet length 
+        unsigned short hdrsize;         -- Length of header, start of data 
+        unsigned short swver;           -- software version in BCD 
+        unsigned short unitid;          -- unit id number 
+        unsigned short buf_id;          -- buffer id for rexmit
+        unsigned long  tag_seconds;     -- time tag in seconds since year begin 
+        unsigned short nsamp;           -- Number of  samples in this packet 
+        unsigned short smprat;          -- Sample rate * 10 
+        unsigned char  datatype;        -- Data type    0x00=16bit,
+                                                0x01=32bit,
+                                                0x02=64bit,
+                                                0x10=16bit compressed,
+                                                0x11=32bit compressed,
+                                                0x12=64bit compressed  
+        unsigned char  nchan;           -- number of data channels 
+        unsigned char  send_backlog;    -- send buffer backlog count 
+        unsigned char  rexmit;          -- # of rexmit for this buffer 
+
+-- 1st data channel header 
+        unsigned char  chid;            -- channel id code (1) 
+        unsigned char  gain;            -- channel 2 gain code
+        unsigned short chbytes;         -- number of data bytes - header 
+        unsigned char  data[chbytes];   -- channel data 
+
+                .
+                .
+-- nchan data channel header 
+        unsigned char  chid;            -- channel id code (nchan) 
+        unsigned char  gain;            -- channel gain codes 
+        unsigned short chbytes;         -- number of data bytes - header 
+        unsigned char  data[chbytes];   -- channel data 
+
+        };
+*/
+
+
+
+libdefunctpkt2 packet parsing map:
+From lib/rt/pkt2/pkts_init.c:
+
+static struct Raw raw_init[] = {
+
+  {  DAAB, (int(*)()) parse_newbba, (int(*)()) read_newbba_DP },
+  {  DABC, (int(*)()) parse_newbba, (int(*)()) read_newbba_DP },
+  {  DACD, (int(*)()) parse_newbba, (int(*)()) read_newbba_DP },
+  {  DADE, (int(*)()) parse_newbba, (int(*)()) read_newbba_DP },
+  {  CBBHS, (int(*)()) parse_bba_DP, (int(*)()) read_DP },
+  {  CBB1S, (int(*)()) parse_bba_DP, (int(*)()) read_DP },
+  {  CBBLS, (int(*)()) parse_bba_DP, (int(*)()) read_DP },
+  {  BSP,   (int(*)()) parse_anza_SP, (int(*)()) read_anza_SP },
+  {  PSCLDT,  (int(*)()) parse_pscl_DP, (int(*)()) read_psclDP },
+  {  PSCLAD,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_AD },
+  {  PSCLCD,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_CD },
+  {  PSCLDS,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_DS },
+  {  PSCLEH,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_EH },
+  {  PSCLET,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_ET },
+  {  PSCLOM,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_OM },
+  {  PSCLSH,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_SH },
+  {  PSCLSC,  (int(*)())  parse_pscl_IP, (int(*)()) read_pscl_SC },
+  {  B3S2DP,  (int(*)()) parse_b3s2, (int(*)()) read_b3s2_DP },
+  {  B3S2SP,  (int(*)())  parse_b3s2, (int(*)()) read_b3s2_SP },
+  {  ORBDBUG,  (int(*)()) none, (int(*)()) un_dbug },
+  {  IWTB,  (int(*)()) none, (int(*)()) unstuff_iw_tracebuf },
+  {  LISSPKT,  (int(*)()) none, (int(*)()) unstuff_liss },
+  {  0, 0, 0 }
+};
+ 
+
+----------------------------------------------------------------------------
+
+What gets sent to the orb:
+The entire DC packet, less the sync character and packet type character, are put into the data portion of the orb packet. The sourcename of the orb packet is generated from the bba packet via a series of convoluted function calls to libdefunctpkt2 and the mappings defined in pkt.pf
