@@ -1,4 +1,19 @@
 /*
+ *  NAMING CONVENTIONS
+ *
+ *    The following variable naming conventions are used throughout this code:
+ *    xVarName, where "x" is one of the following:
+ *
+ *      [i]  Integer variable
+ *      [c]  Character variable
+ *      [s]  String variable
+ *      [a]  Array variable
+ *      [o]  Object/struct variable
+ *      [st] Struct definition
+ *      [b]  Boolean (psuedo) variable (use FALSE and TRUE constants defined
+ *           in "dcbba2orb.h")
+ */
+/*
  * Constants
  */
 #define VERSION "dcbba2orb $Revision$"
@@ -11,9 +26,10 @@
 /*
  * Globals
  */
-int                     orbfd=-1;
-Pf                      *configpf=NULL;
-struct stConfigData     oConfig;
+int iDataConnectionHandle = INVALID_HANDLE;
+int orbfd = -1;
+Pf *configpf = NULL;
+struct stConfigData oConfig;
 
 /*
  * State Variables
@@ -22,231 +38,180 @@ struct stConfigData     oConfig;
 /*
  * Prototypes
  */
-void showCommandLineUsage (void);
-int parseCommandLineOptions (int iArgCount, char *aArgList []);
-int paramFileRead();
+void showCommandLineUsage(void);
+int parseCommandLineOptions(int iArgCount, char *aArgList[]);
+int paramFileRead(void);
+void dcbbaCleanup (int iExitCode);
+void closeAndFreeHandle (int *iHandle);
+char *getBBAStaFromSID (int iSID);
+int iTestSID;
 
-static void
-usage (void)
-{
-    cbanner ( "$Date: 2008/01/22 00:33:50 $", 
-	      "[-m match] [-r reject] [-S statefile] [-v]"
-	          "in out [start-time [period|end-time]]\n",
-	      "Geoff Davis", 
-	      "IGPP/SIO/UCSD", 
-	      "gadavis@ucsd.edu" ) ;
-    exit (1);
+/*
+ * Main program loop
+ */
+int main(int iArgCount, char *aArgList[]) {
+
+	elog_init(iArgCount, aArgList);
+
+	/* Parse out command line options */
+	if (parseCommandLineOptions(iArgCount, aArgList) == RESULT_SUCCESS) {
+		if (paramFileRead () == RESULT_FAILURE) {
+			elog_complain (1, "main(): Error encountered during paramFileRead() operation.");
+			dcbbaCleanup (-1);
+		}
+	}
+	else{
+		elog_complain (1, "main(): Error encountered during parseCommandLineOptions() operation.");
+		dcbbaCleanup (-1);
+	}
+
+	/* Test getBBAStaFromSID */
+	iTestSID=697;
+	printf ("SID %i is station %s\n",iTestSID,getBBAStaFromSID(iTestSID));
+
+	/* If we got this far, cleanup with success (0) exit code */
+	dcbbaCleanup(0);
+	return (0);
 }
 
-#define VERY_LARGE_NUMBER   1e36
+/*
+ * Displays the command line options
+ */
+void showCommandLineUsage(void) {
+	cbanner (VERSION,
+			" [-V] [-v] -a dcipaddr [-d dcdataport] [-c dccommandport] [-o orbname] [-g paramfile] [-s statefile]",
+			"Geoff Davis", "IGPP, UCSD", "gadavis@ucsd.edu");
+}
 
-int
-main (int argc, char **argv)
-{
+/*
+ * Parses out the command line options. Returns RESULT_SUCCESS if all options
+ * are good and within limits, RESULT_FAILURE if there was a problem or that
+ * the program needn't continue running
+ */
+int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
+	int iOption = '\0';
+	int bAddressSet = FALSE;
 
-    int             c,
-                    errflg = 0;
+	/* Initialize the CONFIG structure */
+	oConfig.bVerboseModeFlag = FALSE;
+	oConfig.sDCAddress = "";
+	oConfig.sDCDataPort = DEFAULT_DC_DATA_PORT;
+	oConfig.sDCControlPort = DEFAULT_DC_CONTROL_PORT;
+	oConfig.sOrbName = ":";
+	oConfig.sParamFileName = "dcbba2orb.pf";
+	oConfig.sStateFileName = NULL;
+	oConfig.aSites = NULL;
 
-    char           *in,
-                   *out;
-    int             orbin,
-                    orbout;
-    double          maxpkts = VERY_LARGE_NUMBER ;
-    int             quit;
-    char           *match = 0,
-                   *reject = 0;
-    int             nmatch;
-    int             specified_after = 0;
-    double          after = 0.0,
-                    until = VERY_LARGE_NUMBER ;
-    double          start_time,
-                    end_time,
-                    delta_t ;
-    double          totpkts = 0,
-                    totbytes = 0;
-    static int      last_pktid = -1;
-    static double   last_pkttime = 0.0;
-    char           *statefile = 0;
-    double          last_burial = 0.0;
-    double          decent_interval = 300.0;
-    int             mode = PKT_NOSAMPLES;
-    int             rcode;
-    char            srcname[ORBSRCNAME_SIZE];
-    double          pkttime = 0.0 ;
-    int             pktid;
-    int             nbytes;
-    char           *packet = 0;
-    int             packetsz = 0;
-    Packet         *unstuffed = 0;
+	/* Loop through all possible options */
+	while ((iOption = getopt (iArgCount, aArgList, "vVa:d:c:o:g:s:")) != -1) {
+		switch (iOption) {
+		case 'V':
+			showCommandLineUsage();
+			return RESULT_FAILURE;
+			break;
+		case 'v':
+			oConfig.bVerboseModeFlag = TRUE;
+			break;
+		case 'a':
+			oConfig.sDCAddress = optarg;
+			bAddressSet = TRUE;
+			break;
+		case 'd':
+			oConfig.sDCDataPort = optarg;
+			break;
+		case 'c':
+			oConfig.sDCControlPort = optarg;
+			break;
+		case 'o':
+			oConfig.sOrbName = optarg;
+			break;
+		case 'g':
+			oConfig.sParamFileName = optarg;
+			break;
+		case 's':
+			oConfig.sStateFileName = optarg;
+			break;
 
-    elog_init (argc, argv);
-    elog_notify (0, "%s $Revision: 1.5 $ $Date: 2008/01/22 00:33:50 $\n",
-		 Program_Name);
-
-    while ((c = getopt (argc, argv, "m:n:r:S:v")) != -1) {
-	switch (c) {
-	  case 'm':
-	    match = optarg;
-	    break;
-
-	  case 'n':
-	    maxpkts = atoi (optarg);
-	    break;
-
-	  case 'r':
-	    reject = optarg;
-	    break;
-
-	  case 'S':
-	    statefile = optarg;
-	    break;
-
-	  case 'v':
-	    oConfig.bVerboseModeFlag++;
-	    break;
-
-	  case 'V':
-	    usage ();
-	    break;
-
-	  case '?':
-	    errflg++;
-	}
-    }
-
-    if (errflg || argc - optind < 2 || argc - optind > 4)
-	usage ();
-
-    in = argv[optind++];
-    out = argv[optind++];
-
-    if (argc > optind) {
-	after = str2epoch (argv[optind++]);
-	specified_after = 1;
-	if (argc > optind) {
-	    until = str2epoch (argv[optind++]);
-	    if (until < after) {
-		until += after ;
-	    }
-	}
-    }
-    if ((orbin = orbopen (in, "r&")) < 0)
-	die (0, "Can't open input '%s'\n", in);
-
-    if (statefile != 0) {
-	char           *s;
-	if (exhume (statefile, &quit, RT_MAX_DIE_SECS, 0) != 0) {
-	    elog_notify (0, "read old state file\n");
-	}
-	if (orbresurrect (orbin, &last_pktid, &last_pkttime) == 0) {
-	    elog_notify (0, "resurrection successful: repositioned to pktid #%d @ %s\n",
-			 last_pktid, s = strtime (last_pkttime));
-	    free (s);
-	} else {
-	    complain (0, "resurrection unsuccessful\n");
-	}
-    }
-    if ((orbout = orbopen (out, "w&")) < 0) {
-	die (0, "Can't open output '%s'\n", out);
-    }
-    if (match) {
-	nmatch = orbselect (orbin, match);
-    }
-    if (nmatch < 0) {
-	die (1, "select '%s' returned %d\n", match, nmatch);
-    }
-    if (reject) {
-	nmatch = orbreject (orbin, reject);
-    }
-    if (nmatch < 0) {
-	die (1, "reject '%s' returned %d\n", reject, nmatch);
-    } else {
-	printf ("%d sources selected\n", nmatch);
-    }
-
-    if (specified_after) {
-	pktid = orbafter (orbin, after);
-	if (pktid < 0) {
-	    char           *s;
-	    complain (1, "seek to %s failed\n", s = strtime (after));
-	    free (s);
-	    pktid = forbtell (orbin);
-	    printf ("pktid is still #%d\n", pktid);
-	} else {
-	    printf ("new starting pktid is #%d\n", pktid);
-	}
-    }
-    start_time = now ();
-    while (!quit && pkttime < until && totpkts < maxpkts) {
-	rcode = orbreap (orbin,
-		    &pktid, srcname, &pkttime, &packet, &nbytes, &packetsz);
-
-	switch (rcode) {
-	  case 0:
-	    totpkts++;
-	    totbytes += nbytes;
-
-	    if (oConfig.bVerboseModeFlag) {
-		showPkt (pktid, srcname, pkttime, packet, nbytes, stdout, mode);
-	    }
-	    if (statefile != 0
-		    && last_pkttime - last_burial > decent_interval) {
-		bury ();
-		last_burial = pkttime;
-	    }
-	    switch (unstuffPkt (srcname, pkttime, packet, nbytes, &unstuffed)) {
-	      case Pkt_wf:
-		break;
-
-	      case Pkt_db:
-		break;
-
-	      case Pkt_pf:
-		break;
-
-	      case Pkt_ch:
-		break;
-
-	      default:
-		break;
-	    }
-
-	    if (orbput (orbout, srcname, pkttime, packet, nbytes) < 0) {
-		complain (0, "Couldn't send packet to %s\n", out);
-		break;
-	    }
-	    last_pktid = pktid;
-	    last_pkttime = pkttime;
-	    break;
-
-	  default:
-	    break;
+		/* Handle invalid arguments */
+		default:
+			elog_complain (0, "parseCommandLineOptions(): Invalid command line argument: '-%c'\n\n", iOption);
+			showCommandLineUsage();
+			return RESULT_FAILURE;
+		}
 	}
 
-    }
+	/* Output a log header for our program */
+	elog_notify (0, "%s\n", VERSION);
 
-    if (statefile != 0)
-	bury ();
+	/* Verify valid command line options & combinations */
+	if (bAddressSet == FALSE) {
+		elog_complain (0, "parseCommandLineOptions(): No address for Data Concentrator specified.\n");
+		showCommandLineUsage();
+		return RESULT_FAILURE;
+	}
+	/* If we got this far, everything was fine! */
+	return RESULT_SUCCESS;
+}
 
-    end_time = now ();
-    delta_t = end_time - start_time;
-    if (totpkts > 0) {
-	printf ("\n%.0f %.2f byte packets (%.1f kbytes) in %.3f seconds\n\t%10.3f kbytes/s\n\t%10.3f kbaud\n\t%10.3f pkts/s\n",
-		totpkts, totbytes / totpkts, totbytes / 1024,
-		delta_t,
-		totbytes / delta_t / 1024,
-		totbytes / delta_t / 1024 * 8,
-		totpkts / delta_t);
-    } else {
+/*
+ * Performs "cleanup" tasks -- closes the connections to the data concentrator
+ */
+void dcbbaCleanup (int iExitCode) {
+	/* Log that we exited */
+	elog_notify (0, "dcbbaCleanup(): Exiting with code %i...\n", iExitCode);
 
-	printf ("\nno packets copied\n");
-    }
+	/* Close the data connection handle */
+	closeAndFreeHandle (&iDataConnectionHandle);
 
-    if (orbclose (orbin)) {
-	complain (1, "error closing read orb\n");
-    }
-    if (orbclose (orbout)) {
-	complain (1, "error closing write orb\n");
-    }
-    return 0;
+	/* Exit */
+	exit (iExitCode);
+}
+
+/*
+ * Closes the specified file handle and sets it to INVALID_HANDLE to prevent
+ * further read/write operations on the handle
+ */
+void closeAndFreeHandle (int *iHandle) {
+
+	/* Only close it if it's not already closed */
+	if (*iHandle != INVALID_HANDLE) {
+		close (*iHandle);
+		*iHandle = INVALID_HANDLE;
+	}
+}
+
+/*
+ * Reads the parameter file.
+ */
+int paramFileRead () {
+	int ret;
+	static int first=1;
+	if ((ret=pfupdate(oConfig.sParamFileName,&configpf))<0)
+	{
+		complain(0,"pfupdate(\"%s\", configpf): failed to open config file.\n",oConfig.sParamFileName);
+		exit (-1);
+	}
+	else if (ret==1){
+		if (first)
+			elog_notify(0,"config file loaded %s\n",oConfig.sParamFileName);
+		else
+			elog_notify(0,"updated config file loaded %s\n",oConfig.sParamFileName);
+
+		first=0;
+
+		oConfig.sNetworkName = pfget_string(configpf, "Network_Name");
+		if (oConfig.bVerboseModeFlag==TRUE)
+			elog_notify(0,"Network Name set to %s",oConfig.sNetworkName);
+
+		oConfig.aSites = pfget_arr(configpf, "Site");
+	}
+	/* Return results */
+	return RESULT_SUCCESS;
+}
+
+char *getBBAStaFromSID (int iSID) {
+	char sbuf[5];
+	/* Convert iSID to a string so we can do the pf lookup */
+	sprintf(sbuf,"%i",iSID);
+	return getarr(oConfig.aSites, sbuf);
 }
