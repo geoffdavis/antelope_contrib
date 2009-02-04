@@ -9,10 +9,12 @@
  *      [s]  String variable
  *      [a]  Array variable
  *      [o]  Object/struct variable
+ *      [us] unsigned short variable
  *      [st] Struct definition
  *      [b]  Boolean (psuedo) variable (use FALSE and TRUE constants defined
  *           in "dcbba2orb.h")
  */
+
 /*
  * Constants
  */
@@ -26,7 +28,7 @@
 /*
  * Globals
  */
-int iDCDataConnectionHandle = INVALID_HANDLE;
+Bns *oDCDataBNS = NULL;
 int orbfd = -1;
 Pf *configpf = NULL;
 struct stConfigData oConfig;
@@ -48,17 +50,22 @@ char *getBBADataTypeFromSRate(int iSampleRate);
 int dcDataConnect(int iConnType, char *sConnectionParams[]);
 int dcDataConnectFile(char *sFileName);
 int dcDataConnectSocket(char *sHost, in_port_t iPort);
-int setFileBlocking(int *iHandle, int iBlocking);
-int doReadBytes(int *iHandle, char *sBuffer, unsigned int iByteCount,
-		int bBlocking);
-int doWriteBytes(int *iHandle, char *sBuffer, unsigned int iByteCount);
 void sig_hdlr(int iSignal);
+int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength);
+int parseBBAPacket(unsigned char *aBBAPkt, int iPktLength,
+		struct stBBAPacketInfo* oPktInfo);
 
 /*
  * Main program loop
  */
 int main(int iArgCount, char *aArgList[]) {
-	int iTestSID;
+
+	unsigned char *aBBAPkt; /* Buffer to hold a bba packet read from the wire */
+	int iPktCounter = 0;
+	unsigned char cIn;
+	int iReadState = 0;
+	unsigned short usVal;
+	unsigned short iPktLength;
 
 	elog_init(iArgCount, aArgList);
 
@@ -72,22 +79,144 @@ int main(int iArgCount, char *aArgList[]) {
 			dcbbaCleanup(-1);
 		}
 
+		/* Allocate memory for our packet */
+		allot (unsigned char *, aBBAPkt, oConfig.iBBAPktBufSz);
+
 		/* Set up a signal handler to re-read the parameter file on SIGUSR1*/
 		signal(SIGUSR1, sig_hdlr);
-
-		/*** TEST ROUTINES ***/
-		/* Test getBBAStaFromSID */
-		iTestSID = 697;
-		printf("SID %i is station %s\n", iTestSID, getBBAStaFromSID(iTestSID));
 
 		/* Connect to Data Concentrator's Data read port */
 		if (dcDataConnect(oConfig.iConnectionType, oConfig.sDCConnectionParams)
 				== RESULT_SUCCESS) {
 
 			/*** BEGIN MAIN LOOP ***/
-			do {
+			while (bnsget(oDCDataBNS, &cIn, BYTES, 1) >= 0) {
+				/*hexdump(stderr, &cIn, 1);*/
+				switch (iReadState) { /* Waiting for sync character */
+				case 0:
+					iPktCounter = 0;
+					if (cIn == BBA_SYNC) {
+						aBBAPkt[iPktCounter++] = cIn;
+						iReadState = 1;
+					} else if (cIn == 0xAB || cIn == 0xBB) {
+						elog_complain(
+								0,
+								"main(): state=0, Unsupported packet prefix encountered: %x\n",
+								cIn, cIn);
+					} else {
+						elog_complain(
+								0,
+								"main(): state=0, discarding character '%c' = %x\n",
+								cIn, cIn);
+					}
+					break;
 
-			} while (TRUE);
+				case 1:
+					/* Copy packet type into packet */
+					aBBAPkt[iPktCounter++] = cIn;
+
+					switch (cIn) {
+					case BBA_DAS_DATA:
+					case BBA_DAS_STATUS:
+					case BBA_DC_STATUS:
+					case BBA_RTX_STATUS:
+						iReadState = 4;
+						break;
+
+					default:
+						iReadState = 0;
+						elog_complain(
+								0,
+								"main: state=1, Unknown BBA Packet subtype - discarding character '%c' = %x\n",
+								cIn, cIn);
+						break;
+					}
+					break;
+				case 4: /* Wait for PID and packet length in the header */
+					aBBAPkt[iPktCounter++] = cIn;
+					if (iPktCounter == BBA_CTRL_COUNT) {
+						memcpy((char *) &usVal, &aBBAPkt[BBA_PSIZE_OFF], 2); /* packet size  */
+						if (usVal == 0) {
+							elog_complain(0,
+									"Wrong header. Zero packet size detected.\n");
+							hexdump(stderr, aBBAPkt, iPktCounter);
+							iReadState = 0;
+						} else {
+							iPktLength = ntohs(usVal);
+							iReadState = 5;
+						}
+					}
+					break;
+
+				case 5: /* We have a packet length */
+					aBBAPkt[iPktCounter++] = cIn; /* Keep spooling packet from buffer */
+
+					if (iPktCounter >= iPktLength) { /* packet complete */
+
+						if (validateBBAChecksum(aBBAPkt, iPktLength)
+								== RESULT_FAILURE) { /* Checksum's don't match */
+							elog_complain(0,
+									"discarding packet with bad checksum\n");
+							hexdump(stderr, aBBAPkt, iPktLength);
+						} else { /* Checksum's match, grab additional data from the packet */
+							if (oConfig.bVerboseModeFlag)
+								hexdump(stderr, aBBAPkt, iPktLength);
+							/*
+							 err = 0;
+							 if ((err = valid_pkt(&newbuffer, &srcname[0],
+							 &epoch, &psize, plength, hdrtype)) > 0) {
+							 complain(0,
+							 "read_socket(): Not valid packet. Wrong HEADER? \n");
+							 } else {
+							 cansend = 1;
+							 if (fabs(epoch - prev_time) > 86400.0) {
+							 prev_time = now();
+							 if (fabs(epoch - prev_time) > 86400.0) {
+							 sp = (ushort_t *) &newbuffer[0];
+							 hdrsiz = ntohs(*sp);
+							 memcpy((char *) &ysec, newbuffer
+							 + hdrsiz + 10, 4);
+							 complain(
+							 0,
+							 "%s packet has bad time - %s (epoch:%lf - ysec:%ld). Will discard packet.\n",
+							 srcname, s = strtime(epoch),
+							 epoch, ysec);
+							 free(s);
+							 if (Log)
+							 hexdump(stderr, newbuffer + hdrsiz,
+							 48);
+							 cansend = 0;
+							 } else
+							 prev_time = epoch;
+							 } else
+							 prev_time = epoch;
+
+							 if (ports->orb > 0 && cansend) {
+							 if (orbput(ports->orb, &srcname[0], epoch,
+							 (char *) newbuffer, psize) < 0) {
+							 orbclose(ports->orb);
+							 die(1,
+							 "Can't send a packet to orbserver.\n");
+							 }
+							 }
+							 }*/
+						}
+						iReadState = 0;
+					}
+					if (iPktCounter >= oConfig.iBBAPktBufSz) {
+						complain(
+								0,
+								"attempted to accumulate %d byte packet: too large for internal buffer\n",
+								iPktCounter);
+						iReadState = 0;
+					}
+					break;
+
+				}
+
+			}
+			elog_complain(0, "main(): bnsget failed to read");
+			dcbbaCleanup(-1);
 		}
 
 		/* Else unable to connect, cleanup with failure (-1) exit code */
@@ -135,6 +264,7 @@ int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
 	oConfig.sParamFileName = "dcbba2orb.pf";
 	oConfig.sStateFileName = NULL;
 	oConfig.oSites = NULL;
+	oConfig.iBBAPktBufSz = DEFAULT_BBA_PKT_BUF_SZ;
 
 	/* Loop through all possible options */
 	while ((iOption = getopt(iArgCount, aArgList, "vVa:d:c:o:g:s:t:")) != -1) {
@@ -205,23 +335,10 @@ void dcbbaCleanup(int iExitCode) {
 	elog_notify(0, "dcbbaCleanup(): Exiting with code %i...\n", iExitCode);
 
 	/* Close the data connection handle */
-	closeAndFreeHandle(&iDCDataConnectionHandle);
+	bnsclose(oDCDataBNS);
 
 	/* Exit */
 	exit(iExitCode);
-}
-
-/*
- * Closes the specified file handle and sets it to INVALID_HANDLE to prevent
- * further read/write operations on the handle
- */
-void closeAndFreeHandle(int *iHandle) {
-
-	/* Only close it if it's not already closed */
-	if (*iHandle != INVALID_HANDLE) {
-		close(*iHandle);
-		*iHandle = INVALID_HANDLE;
-	}
 }
 
 /*
@@ -356,14 +473,13 @@ int dcDataConnect(int iConnType, char *sConnectionParams[]) {
 
 /*
  * Connect to the Data Concentrator's Data Port via TCP/IP
- * NOT IMPLEMENTED YET
  */
 int dcDataConnectSocket(char *sHost, in_port_t iPort) {
-	return RESULT_FAILURE;
 
 	/* Initialize */
 	unsigned long iNetAddress;
 	int iConnectionResult = 1;
+	int iFH; /*Temporary filehandle that gets used to create the Bns structure */
 	struct hostent *oHostEnt;
 	struct sockaddr_in oAddress;
 	/*int					iSocketOptVal = 1; UNUSED, would be used if we set keepalive*/
@@ -385,7 +501,7 @@ int dcDataConnectSocket(char *sHost, in_port_t iPort) {
 	}
 
 	/* Create socket */
-	if ((iDCDataConnectionHandle = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+	if ((iFH = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		elog_complain(1, "dcDataConnectSocket(): Could not create socket.");
 		return RESULT_FAILURE;
 	}
@@ -398,15 +514,18 @@ int dcDataConnectSocket(char *sHost, in_port_t iPort) {
 				sHost, iPort);
 
 	/* Try connecting */
-	iConnectionResult = connect(iDCDataConnectionHandle,
-			(struct sockaddr *) &oAddress, sizeof(oAddress));
+	iConnectionResult = connect(iFH, (struct sockaddr *) &oAddress,
+			sizeof(oAddress));
 	if (iConnectionResult) {
 		elog_complain(1, "dcDataConnectSocket(): Could not connect to socket");
-		close(iDCDataConnectionHandle);
+		close(iFH);
 		return RESULT_FAILURE;
 	}
 
-	/* Do we need to do Keepalive like in davis2orb? Not implementing yet*/
+	/* Now that we've got our socket handle, make a Bns out of it */
+	oDCDataBNS = bnsnew(iFH, DATA_RD_BUF_SZ);
+	/* Since iFH is a socket, set up the BNS to use Socket read routines */
+	bnsuse_sockio(oDCDataBNS);
 
 	/* If we got this far, everything was successful */
 	return RESULT_SUCCESS;
@@ -419,15 +538,17 @@ int dcDataConnectSocket(char *sHost, in_port_t iPort) {
  * Packet dump is simply a file containing only the data fields from the TCP/IP packet stream as extracted by Wireshark
  */
 int dcDataConnectFile(char *sFileName) {
+	int iFH;
 	/*  Attempt to open the file in Read-Only mode */
-	iDCDataConnectionHandle = open(sFileName, O_RDONLY);
-	if (iDCDataConnectionHandle < 0) {
+	iFH = open(sFileName, O_RDONLY);
+	if (iFH < 0) {
 		elog_complain(1,
 				"dcDataConnectFile(): Unable to open dummy data file '%s'.",
 				sFileName);
 		return RESULT_FAILURE;
 	}
 
+	oDCDataBNS = bnsnew(iFH, DATA_RD_BUF_SZ);
 	/* If we got here, return RESULT_SUCCESS */
 	return RESULT_SUCCESS;
 }
@@ -439,7 +560,7 @@ void sig_hdlr(int signo) {
 
 	if (paramFileRead() == RESULT_FAILURE) {
 		elog_complain(1,
-				"main(): Error encountered during paramFileRead() operation.");
+				"sig_hdlr(): Error encountered during paramFileRead() operation:");
 		dcbbaCleanup(-1);
 	}
 
@@ -449,154 +570,50 @@ void sig_hdlr(int signo) {
 }
 
 /*
- **  Sets the BLOCKING state of the specified file descriptor.
- **
- **  Parameters:
- **
- **    [*iHandle]   The file descriptor to operate on
- **    [iBlocking]  Integer value representing the state of BLOCKING
- **                 (0 = Disable; 1 = Enable)
- **
- **  Returns:
- **
- **    RESULT_SUCCESS on success, RESULT_FAILURE otherwise.
+ * Calculate a packet checksum and compare it to what is in the packet.
+ * Return TRUE if the checksums match, FALSE if they don't
  */
-int setFileBlocking(int *iHandle, int iBlocking) {
+int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength) {
+	unsigned short usPktChksum, usCalcChksum; /* Holds the checksum values */
+	unsigned short *usChksumPtr; /* Pointer for calculating the checksum */
 
-	int iTempVal = 0;
+	/* Go through the data portion of the packet one unsigned short at a time.
+	 * The checksum is calculated on the entire packet assuming
+	 * that the checksum byte fields are 0. Thus, we include the packet sync bytes from the beginning
+	 * of the packet (0xDAAB or similar) but skip over the checksum bytes*/
 
-	/* Initialize */
-	iTempVal = fcntl(*iHandle, F_GETFL, 0);
-	if (iTempVal == -1) {
-		elog_complain(1, "setFileBlocking: fcntl(*fd,F_GETFL,0)");
+	/* Initialize variables for checksum loop */
+	usCalcChksum = 0;
+	usChksumPtr = (unsigned short *) &aBBAPkt[0];
+
+	/* Include the packet header bytes in usCalcChksum */
+	usCalcChksum ^= ntohs(*usChksumPtr++);
+
+	/* Extract the checksum from the packet, and skip it in the calculated checksum */
+	usPktChksum = ntohs(*usChksumPtr++);
+
+	/*
+	 * We have now skipped forward enough that usChksumPtr should be pointing at the offset
+	 * for the packet size, so we need to iterate through the remainder of the packet
+	 */
+	for (; (int) usChksumPtr < ((int) &aBBAPkt[0] + iPktLength); usChksumPtr++) {
+		usCalcChksum ^= ntohs(*usChksumPtr);
+	}
+
+	if (usCalcChksum != usPktChksum) {
+		elog_complain(0, "bad checksum  PCHK:%04X!=CHK:%04X\n", usPktChksum,
+				usCalcChksum);
 		return RESULT_FAILURE;
 	}
 
-	/* Set the BLOCKING mode */
-	if (iBlocking == 1)
-		iTempVal &= ~O_NONBLOCK;
-	else
-		iTempVal |= O_NONBLOCK;
-
-	/* Set the state */
-	iTempVal = fcntl(*iHandle, F_SETFL, iTempVal);
-	if (iTempVal == -1) {
-		elog_complain(1, "setFileBlocking: fcntl(*fd,F_SETFL,iTempVal)");
-		return RESULT_FAILURE;
-	}
-
-	/* Return results */
 	return RESULT_SUCCESS;
 }
 
-int doReadBytes(int *iHandle, char *sBuffer, unsigned int iByteCount,
-		int bBlocking) {
-
-	int iReturnVal = 0;
-	int iBytesRead = 0;
-	fd_set readfd;
-	fd_set except;
-	struct timeval timeout;
-	int selret;
-
-	/* Check for valid handle */
-	if (*iHandle == INVALID_HANDLE)
-		return RESULT_FAILURE;
-
-	if (setFileBlocking(iHandle, FALSE) == RESULT_FAILURE) {
-		elog_complain(0, "doReadBytes: failed to set device to non-blocking\n");
-		close(*iHandle);
-		*iHandle = INVALID_HANDLE;
-		return RESULT_FAILURE;
-	}
-
-	while (1) {
-		timeout.tv_sec = MAX_DC_READ_DELAY;
-		timeout.tv_usec = 0;
-
-		FD_ZERO(&readfd);
-		FD_SET(*iHandle,&readfd);
-
-		FD_ZERO(&except);
-		FD_SET(*iHandle,&except);
-
-		selret = select(*iHandle + 1, &readfd, NULL,&except, &timeout);
-
-		if (selret < 0) {
-			elog_complain(1, "doReadBytes: select() on read failed");
-			close(*iHandle);
-			*iHandle = INVALID_HANDLE;
-			return RESULT_FAILURE;
-		} else if (!selret) {
-			if (bBlocking == TRUE) {
-				elog_complain(0,
-						"doReadBytes: timed out (%d seconds) in select()\n",
-						MAX_DC_READ_DELAY);
-				close(*iHandle);
-				*iHandle = INVALID_HANDLE;
-				return RESULT_FAILURE;
-			} else
-				return iBytesRead;
-		} else {
-
-			iReturnVal = read(*iHandle, &(sBuffer[iBytesRead]), iByteCount);
-
-			/* See if we need to error out */
-			if ((iReturnVal < 0) && (errno!= EAGAIN)) {
-				elog_complain(1,
-						"doReadBytes: Error encountered during read from Davis:");
-				close(*iHandle);
-				*iHandle = INVALID_HANDLE;
-				return RESULT_FAILURE;
-			} else if (errno== EAGAIN && bBlocking == FALSE) {
-				return 0;
-			} else if (iReturnVal > 0) {
-				iBytesRead += iReturnVal;
-				if (iBytesRead == iByteCount) {
-					/* Restore BLOCKING on the connection */
-					if (setFileBlocking(iHandle, TRUE) == RESULT_FAILURE) {
-						close(*iHandle);
-						*iHandle = INVALID_HANDLE;
-						return RESULT_FAILURE;
-					}
-
-					return iBytesRead;
-				}
-			}
-		}
-	}
-}
-
 /*
- **  Wrapper for write() command; handles errors and checks the file descriptor
- **  for validity before attempting to write.
- **
- **  Returns the number of bytes written (>=0), or RESULT_FAILURE if there was
- **  a problem.
+ * Parse a new format BBA packet and fill out a stBBAPacketInfo struct
+ * returns RESULT_FAILURE if there's an error
  */
-int doWriteBytes(int *iHandle, char *sBuffer, unsigned int iByteCount) {
-
-	/* Initialize */
-	int iResult = RESULT_FAILURE;
-
-	/* Check for valid handle */
-	if (*iHandle == INVALID_HANDLE)
-		elog_complain(0, "doWriteBytes: called with invalid file descriptor.\n");
-
-	/* Else it's valid, try writing */
-	else {
-		iResult = write(*iHandle, sBuffer, iByteCount);
-		if (iResult < iByteCount) {
-			elog_complain(
-					1,
-					"doWriteBytes: Error calling 'write' (error code=%u, %d bytes written):",
-					errno,iResult);
-			close(*iHandle);
-			*iHandle = INVALID_HANDLE;
-			return RESULT_FAILURE;
-		}
-	}
-
-	/* Return results */
-	return iResult;
+int parseBBAPacket(unsigned char *aBBAPkt, int iPktLength,
+		struct stBBAPacketInfo* oPktInfo) {
+	return RESULT_FAILURE;
 }

@@ -47,12 +47,38 @@
 #define FALSE                   0
 #define TRUE                    1
 #define MAX_BUFFER_SIZE         5000
+#define DATA_RD_BUF_SZ			1024
+#define DEFAULT_BBA_PKT_BUF_SZ	16384
 
-/*BBA Packet Types*/
-int BBA_DAS_DATA				= 0xDAAB;
-int BBA_DAS_STATUS				= 0xDABC;
-int BBA_DC_STATUS				= 0xDACD;
-int BBA_RTX_STATUS				= 0xDADE;
+/*
+ * BBA Packet Sync Character
+ */
+#define BBA_SYNC 				0xDA
+
+/*
+ * BBA Packet Types
+ */
+#define BBA_DAS_DATA			0xAB
+#define BBA_DAS_STATUS			0xBC
+#define BBA_DC_STATUS			0xCD
+#define BBA_RTX_STATUS			0xDE
+
+/*
+ * BBA Packet Offsets
+ */
+#define BBA_CTRL_COUNT			16
+#define BBA_CHKSUM_OFF 			(2)
+#define BBA_PSIZE_OFF  			(4)
+#define BBA_HSIZE_OFF  			(6)
+#define BBA_STAID_OFF  			(10)
+#define BBA_TIME_OFF   			(14)
+#define BBA_NSAMP_OFF  			(18)
+#define BBA_SRATE_OFF  			(20)
+#define BBA_DTYPE_OFF  			(22)
+#define BBA_NCHAN_OFF  			(23)
+
+#define BBA_CHBYTES_OFF 		(2)
+#define BBA_CHHDR_SIZE  		(4)
 
 /* Holds configuration data from command line and parameter file. */
 struct stConfigData {
@@ -65,5 +91,12 @@ struct stConfigData {
 	char *sParamFileName;
 	char *sStateFileName;
 	Arr *oSites;
+	int iBBAPktBufSz;
+};
+
+struct stBBAPacketInfo {
+	Srcname oSrcname;
+	double dEpoch;
+	int psize;
 };
 #endif
