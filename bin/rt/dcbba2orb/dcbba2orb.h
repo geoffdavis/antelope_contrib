@@ -95,8 +95,17 @@ struct stConfigData {
 };
 
 struct stBBAPacketInfo {
-	Srcname oSrcname;
-	double dEpoch;
-	int psize;
+	Srcname oSrcname;	/* Struct containing Net/Sta/Chan info */
+	double dPktTime;		/* Packet Timestamp */
+	int iPktSize;			/* Packet Size in Bytes */
+	int iStaID;			/* Station ID - needs to be translated to a string via the parameter file */
+	int iNSamp;			/* Packet Size in Bytes */
+	int iNChan;			/* Number of Channels */
+	float fSrate;		/* Sample Rate */
+	int iHdrSize;		/* Size of the header before the data points */
+    char sDataType[4];
+    char sPktType[12];  /* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
+    char sHdrType[12];	/* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
+    char sNetType[32];	/* Net type  */
 };
 #endif

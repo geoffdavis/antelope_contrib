@@ -11,6 +11,7 @@
  *      [o]  Object/struct variable
  *      [us] unsigned short variable
  *      [st] Struct definition
+ *      [d]	 double variable
  *      [b]  Boolean (psuedo) variable (use FALSE and TRUE constants defined
  *           in "dcbba2orb.h")
  */
@@ -45,15 +46,15 @@ int parseCommandLineOptions(int iArgCount, char *aArgList[]);
 int paramFileRead(void);
 void dcbbaCleanup(int iExitCode);
 void closeAndFreeHandle(int *iHandle);
-char *getBBAStaFromSID(int iSID);
-char *getBBADataTypeFromSRate(int iSampleRate);
+int getBBAStaFromSID(int iStaID, char *sStaName);
+int getBBADataTypeFromSRate(float fSampleRate, char *sDataType);
 int dcDataConnect(int iConnType, char *sConnectionParams[]);
 int dcDataConnectFile(char *sFileName);
 int dcDataConnectSocket(char *sHost, in_port_t iPort);
 void sig_hdlr(int iSignal);
 int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength);
-int parseBBAPacket(unsigned char *aBBAPkt, int iPktLength,
-		struct stBBAPacketInfo* oPktInfo);
+int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo);
+int readFromDC(struct stBBAPacketInfo *oPktInfo, unsigned char *aBBAPkt);
 
 /*
  * Main program loop
@@ -66,6 +67,7 @@ int main(int iArgCount, char *aArgList[]) {
 	int iReadState = 0;
 	unsigned short usVal;
 	unsigned short iPktLength;
+	struct stBBAPacketInfo oPktInfo;
 
 	elog_init(iArgCount, aArgList);
 
@@ -161,6 +163,13 @@ int main(int iArgCount, char *aArgList[]) {
 						} else { /* Checksum's match, grab additional data from the packet */
 							if (oConfig.bVerboseModeFlag)
 								hexdump(stderr, aBBAPkt, iPktLength);
+
+							if (parseBBAPacket(aBBAPkt, &oPktInfo)
+									== RESULT_SUCCESS) {
+								/* Put the packet into the orb */
+							} else
+								elog_complain(0,
+										"parseBBAPacket was unable to parse the packet. Skipping.\n");
 							/*
 							 err = 0;
 							 if ((err = valid_pkt(&newbuffer, &srcname[0],
@@ -234,6 +243,12 @@ int main(int iArgCount, char *aArgList[]) {
 	return (0);
 }
 
+/*
+ * Reads packets from the Data Concentrator
+ */
+int readFromDC(struct stBBAPacketInfo *oPktInfo, unsigned char *aBBAPkt){
+	return RESULT_FAILURE;
+}
 /*
  * Displays the command line options
  */
@@ -335,7 +350,8 @@ void dcbbaCleanup(int iExitCode) {
 	elog_notify(0, "dcbbaCleanup(): Exiting with code %i...\n", iExitCode);
 
 	/* Close the data connection handle */
-	bnsclose(oDCDataBNS);
+	if (oDCDataBNS)
+		bnsclose(oDCDataBNS);
 
 	/* Exit */
 	exit(iExitCode);
@@ -375,11 +391,19 @@ int paramFileRead() {
  * Helper function to get a BBA Station Name from the SID encoded in the packet.
  * Uses oConfig.oSites pulled from the Sites array defined in the parameter file
  */
-char *getBBAStaFromSID(int iSID) {
+int getBBAStaFromSID(int iStaID, char *StaName) {
 	char sbuf[5];
-	/* Convert iSID to a string so we can do the pf lookup */
-	sprintf(sbuf, "%i", iSID);
-	return getarr(oConfig.oSites, sbuf);
+	void *result;
+	/* Convert iStaID to a string so we can do the pf lookup */
+	sprintf(sbuf, "%i", iStaID);
+	result = getarr(oConfig.oSites, sbuf);
+	if (result == NULL) {
+		elog_complain(0,
+				"getBBAStaFromSID: unable to find StaName for StaID %i", iStaID);
+		return RESULT_FAILURE;
+	}
+	strcpy(StaName, result);
+	return RESULT_SUCCESS;
 }
 
 /*
@@ -392,20 +416,26 @@ char *getBBAStaFromSID(int iSID) {
  *
  * This information was taken from the parse_newbba function in libdefuntpkt2 pkttype.c
  */
-char *getBBADataTypeFromSRate(int iSampleRate) {
-	if (iSampleRate < 10) {
-		return "LS";
-	} else if ((iSampleRate >= 10) && (iSampleRate < 100)) {
-		return "BS";
-	} else if (iSampleRate >= 100) {
-		return "HS";
+int getBBADataTypeFromSRate(float fSampleRate, char *sDataType) {
+
+	if (fSampleRate < 10) {
+		strcpy(sDataType, "LS");
+		return RESULT_SUCCESS;
+	} else if ((fSampleRate >= 10) && (fSampleRate < 100)) {
+		strcpy(sDataType, "BS");
+		return RESULT_SUCCESS;
+	} else if (fSampleRate >= 100) {
+		strcpy(sDataType, "HS");
+		return RESULT_SUCCESS;
 	}
 
 	/* We shouldn't ever get here unless iSampleRate is way out of range or NULL*/
-	elog_complain(0,
-			"Unable to determine DataType from given sample rate of %i",
-			iSampleRate);
-	return "";
+	strcpy(sDataType, "");
+	elog_complain(
+			0,
+			"getBBADataTypeFromSRate: Unable to determine DataType from given sample rate of %f",
+			fSampleRate);
+	return RESULT_FAILURE;
 }
 
 /*
@@ -435,8 +465,8 @@ int dcDataConnect(int iConnType, char *sConnectionParams[]) {
 
 		/* Handle TCP/IP connections */
 		if (iConnType == CONNECT_TCP_IP) {
-			iResult = dcDataConnectSocket(sConnectionParams[0], atoi(
-					sConnectionParams[1]));
+			iResult = dcDataConnectSocket(sConnectionParams[0],
+					(in_port_t) atoi(sConnectionParams[1]));
 		}
 
 		/* Handle File Simulation */
@@ -613,7 +643,129 @@ int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength) {
  * Parse a new format BBA packet and fill out a stBBAPacketInfo struct
  * returns RESULT_FAILURE if there's an error
  */
-int parseBBAPacket(unsigned char *aBBAPkt, int iPktLength,
-		struct stBBAPacketInfo* oPktInfo) {
-	return RESULT_FAILURE;
+int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
+	/* Variables */
+	unsigned short usVal;
+	double dPTime, dYTime, dSec;
+	int iYear, iDay, iHour, iMin;
+	unsigned long ysec;
+	char sTMPNameCmpt[PKT_TYPESIZE];
+	char sGeneratedSrcName[500];
+
+	/*
+	 * Start extracting portions of the packet and putting the results into oPktInfo fields
+	 */
+	memcpy((char *) &usVal, &aBBAPkt[BBA_PSIZE_OFF], 2); /* packet size */
+	if (usVal == 0) {
+		elog_complain(0, "Wrong header. Zero packet size detected.\n");
+		return RESULT_FAILURE;
+	} else
+		oPktInfo->iPktSize = ntohs(usVal);
+
+	memcpy((char *) &usVal, &aBBAPkt[BBA_STAID_OFF], 2); /* sta ID */
+	if (oPktInfo->iPktSize == 0) {
+		elog_complain(0, "Wrong header. Zero packet size detected.\n");
+		return RESULT_FAILURE;
+	} else
+		oPktInfo->iStaID = ntohs(usVal);
+
+	memcpy((char *) &usVal, &aBBAPkt[BBA_NSAMP_OFF], 2); /* # of samples */
+	if (usVal == 0) {
+		elog_complain(0, "Wrong header. Zero number of samples detected.\n");
+		return RESULT_FAILURE;
+	} else
+		oPktInfo->iNSamp = ntohs(usVal);
+
+	memcpy((char *) &usVal, &aBBAPkt[BBA_SRATE_OFF], 2); /* Sample rate */
+	if (usVal == 0) {
+		elog_complain(0, "Wrong header. Zero sample rate detected.\n");
+		return RESULT_FAILURE;
+	} else
+		oPktInfo->fSrate = ntohs(usVal);
+
+	memcpy((char *) &usVal, &aBBAPkt[BBA_HSIZE_OFF], 2); /* header size */
+	if (usVal == 0) {
+		elog_complain(0, "Wrong header. Zero header size detected.\n");
+		return RESULT_FAILURE;
+	} else
+		oPktInfo->iHdrSize = ntohs(usVal);
+
+	oPktInfo->iNChan = aBBAPkt[BBA_NCHAN_OFF]; /* Number of channels */
+	if (oPktInfo->iNChan == 0) {
+		elog_complain(0, "Wrong header. Zero number of channels detected.\n");
+		return RESULT_FAILURE;
+	}
+
+	/* get data type */
+	switch (aBBAPkt[BBA_DTYPE_OFF]) {
+	case 0x0:
+		strcpy(oPktInfo->sDataType, "s2");
+		break;
+	case 0x01:
+		strcpy(oPktInfo->sDataType, "s4");
+		break;
+	case 0x02:
+		strcpy(oPktInfo->sDataType, "t4");
+	case 0x10:
+	case 0x11:
+	case 0x12:
+		strcpy(oPktInfo->sDataType, "c0");
+		break;
+	default:
+		elog_complain(0, "Can't recognize a data type %d(%02x)\n",
+				aBBAPkt[BBA_DTYPE_OFF], aBBAPkt[BBA_DTYPE_OFF]);
+		return RESULT_FAILURE;
+	}
+
+	/* Get packet time */
+	dYTime = now();
+	e2h(dYTime, &iYear, &iDay, &iHour, &iMin, &dSec);
+	dPTime = epoch(iYear * 1000);
+
+	memcpy((char *) &ysec, &aBBAPkt[BBA_TIME_OFF], 4);
+	oPktInfo->dPktTime = dPTime + ntohl(ysec);
+
+	/* Fill in the SrcName fields */
+	strcpy(oPktInfo->oSrcname.src_net, oConfig.sNetworkName); /* Net */
+
+	/* Sta */
+	if (getBBAStaFromSID(oPktInfo->iStaID, sTMPNameCmpt) == RESULT_FAILURE) {
+		elog_complain(0, "Lookup of Station Name Failed.\n");
+		return RESULT_FAILURE;
+	}
+	strcpy(oPktInfo->oSrcname.src_sta, sTMPNameCmpt);
+	strcpy(oPktInfo->oSrcname.src_chan, ""); /* Chan (always null for these packets) */
+	strcpy(oPktInfo->oSrcname.src_loc, ""); /* Loc (always null for these packets) */
+	strcpy(oPktInfo->oSrcname.src_suffix, "BBA"); /* Suffix */
+
+	/* Subcode */
+	switch (aBBAPkt[1]) {
+	case BBA_DAS_DATA: /* Data Packets */
+		if (getBBADataTypeFromSRate(oPktInfo->fSrate, sTMPNameCmpt)
+				== RESULT_FAILURE) {
+			elog_complain(0, "Lookup of Subcode from Sample Rate failed.\n");
+			return RESULT_FAILURE;
+		}
+		strcpy(oPktInfo->oSrcname.src_subcode, sTMPNameCmpt);
+		break;
+	case BBA_DAS_STATUS: /* DAS Status Packets */
+		strcpy(oPktInfo->oSrcname.src_subcode, "DAS");
+		break;
+	case BBA_DC_STATUS: /* DC Status Packets */
+		strcpy(oPktInfo->oSrcname.src_subcode, "DC");
+		break;
+	case BBA_RTX_STATUS: /* RTX Status Packets */
+		strcpy(oPktInfo->oSrcname.src_subcode, "RTX");
+		break;
+	default:
+		elog_complain(0, "Can't recognize a data packet type - %d(%02x)\n",
+				aBBAPkt[1], aBBAPkt[1]);
+		return RESULT_FAILURE;
+	}
+
+	join_srcname(&oPktInfo->oSrcname, sGeneratedSrcName);
+	if (oConfig.bVerboseModeFlag)
+		printf("Sourcename evaluates to %s\n", sGeneratedSrcName);
+
+	return RESULT_SUCCESS;
 }
