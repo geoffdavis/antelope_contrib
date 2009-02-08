@@ -27,7 +27,7 @@
 /*
  * Constants
  */
-#define CONNECT_SERIAL          1
+#define CONNECT_SERIAL          1	/* Not supported here */
 #define CONNECT_TCP_IP          2
 #define CONNECT_FILE			3
 #define MAX_CONNECT_ATTEMPTS    10  /* Max tries to connect via serial/TCP */
@@ -39,6 +39,7 @@
 #define DEFAULT_SERIAL_SPEED    "19200"
 #define DEFAULT_DC_DATA_PORT 	"5000"
 #define DEFAULT_DC_CONTROL_PORT "5001"
+#define DEFAULT_PARAM_FILE		"dcbba2orb.pf"
 #define RESULT_SUCCESS          0
 #define RESULT_FAILURE          -1
 #define INVALID_HANDLE          -1
@@ -80,22 +81,31 @@
 #define BBA_CHBYTES_OFF 		(2)
 #define BBA_CHHDR_SIZE  		(4)
 
-/* Holds configuration data from command line and parameter file. */
+/*
+ * Holds configuration data from command line and parameter file.
+ */
 struct stConfigData {
-	int bVerboseModeFlag;
-	int iConnectionType;
-	char *sNetworkName;
-	char *sOrbName;
-	char *sDCConnectionParams [3];
-	char *sDCControlPort;
-	char *sParamFileName;
+	int bVerboseModeFlag;			/* Print debug information */
+	int iConnectionType;			/* Connection type - either CONNECT_TCP_IP or CONNECT_FILE */
+	char *sNetworkName;				/* Network code - AZ, TA, etc */
+	char *sOrbName;					/* Orbserver to output packets to */
+	char *sDCConnectionParams [3];	/* Array to hold connection parameters for the Data concentrator */
+	char *sDCControlPort;			/* Port number for the data concentrator's control port */
+	char *sParamFileName;			/* Parameter File Name */
 	char *sStateFileName;
-	Arr *oSites;
-	int iBBAPktBufSz;
+	Pf *oConfigPf;
+	Tbl *oSiteTbl;					/* Tbl 'Site' as read from sParamFileName */
+	Arr *oStaName;					/* List of station names by DAS/Station Id */
+	Arr *oStaCh;					/* List of Site structs by PktType, SID, and SensorID */
+	Arr *oDasID;					/* Arr 'Das_Stat' as read from sParamFileName */
+	Arr *oDcID;						/* Arr 'DC_Stat' as read from sParamFileName */
+	Arr *oRTXID;					/* Arr 'RTX_Stat' as read from sParamFileName */
+	int iBBAPktBufSz;				/* How big to set the string buffer for reading in BBA packets */
 };
 
 struct stBBAPacketInfo {
 	Srcname oSrcname;	/* Struct containing Net/Sta/Chan info */
+	char sSrcname[500];		/* String to hold generated source name derived from oSrcname */
 	double dPktTime;		/* Packet Timestamp */
 	int iPktSize;			/* Packet Size in Bytes */
 	int iStaID;			/* Station ID - needs to be translated to a string via the parameter file */
@@ -107,5 +117,37 @@ struct stBBAPacketInfo {
     char sPktType[12];  /* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
     char sHdrType[12];	/* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
     char sNetType[32];	/* Net type  */
+    char sChNames[128]; /* Names of the channels */
 };
+
+#define TRIM(s,l) {int i;for(i=l-1;i>0,s[i-1]==' ';i--);s[i]='\0';}
+
+/* A row from the Site Table in pkt.pf */
+struct stSiteEntry {
+	char sDTYPE[12];		/* Packet type - CBBHS, CBBLS, etc */
+	int iSID;				/* DAS/Station ID (StaID) */
+	char sNAME[8];			/* Site name */
+	int iCOMP;				/* Sensor ID, referred to as sensid in old _pkt2.h */
+	char sSENS[12];			/* Sensor name */
+	double dCALIB;			/* calibration coef */
+};
+
+/* Definition for reading&trimming&writing the structure  */
+
+#define STE_RVL(SP)  \
+(SP)->sDTYPE,&(SP)->iSID,(SP)->sNAME,&(SP)->iCOMP,(SP)->sSENS, &(SP)->dCALIB
+
+#define STE_TRIM(SP) \
+TRIM((SP)->sDTYPE,11);TRIM((SP)->sNAME,7); TRIM((SP)->sSENS,11)
+
+#define STE_SCS " %s %d %s %d %s %lf[^\n] \n"
+
+/* Client Packet headers . Do NOT move around structure fields! */
+struct stBBAPreHdr {
+    short           hdrsiz;	       /* header size */
+    short           pktsiz;	       /* raw packet size */
+    unsigned short  hdrtype;	   /* header type  */
+    unsigned short  pkttype;	   /* packet type tag  */
+};
+
 #endif
