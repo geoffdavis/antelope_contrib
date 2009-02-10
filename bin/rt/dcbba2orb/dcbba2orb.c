@@ -54,8 +54,8 @@ void sig_hdlr(int iSignal);
 int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength);
 int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo);
 int readFromDC(struct stBBAPacketInfo *oPktInfo, unsigned char *aBBAPkt);
-int addOrbHeaderToBBA(struct stBBAPacketInfo *oPktInfo,
-		unsigned char **aInBBAPkt, char **sOutPkt);
+int addOrbHeaderToBBA(struct stBBAPacketInfo *PktInfo,
+		unsigned char *BBAPktIn, char **OrbPktOut);
 char *getBBAChNameFromId(unsigned short usBBAPktType, char *sSubCode,
 		int iStaId, int iChId);
 int initSiteLookupArrays(void);
@@ -70,7 +70,8 @@ int main(int iArgCount, char *aArgList[]) {
 	double dPrevTime;
 	char *sTimeStamp;
 	int bOKToSend;
-	char **sOutPkt;
+	char *sOutPkt; /* Packet to put onto the orb */
+	int iOutPktLen; /* Length of sOutPkt */
 
 	elog_init(iArgCount, aArgList);
 
@@ -123,17 +124,28 @@ int main(int iArgCount, char *aArgList[]) {
 
 				if (bOKToSend == TRUE) {
 					/* Add orb header to Packet */
-					if (addOrbHeaderToBBA(&oPktInfo, &aBBAPkt, sOutPkt)
-							== RESULT_SUCCESS) {
+					iOutPktLen = addOrbHeaderToBBA(&oPktInfo, aBBAPkt,
+							&sOutPkt);
+					if (iOutPktLen == 0) {
+						/*whine*/
+						elog_complain(
+								1,
+								"An error occurred while adding the ORB header to the raw packet. Not submitting to the orb.");
+					} else if (sOutPkt == 0) {
+						die(1,
+								"Output packet length was non-zero but pointer to Output packet is null");
+					} else {
 
 						/*put it into the  orb, chief */
-						if (oConfig.bVerboseModeFlag == TRUE)
+						if (oConfig.bVerboseModeFlag == TRUE) {
 							showPkt(0, oPktInfo.sSrcname, oPktInfo.dPktTime,
-									(char *) aBBAPkt, oPktInfo.iPktSize,
-									stderr, PKT_UNSTUFF);
+									sOutPkt, iOutPktLen, stderr, PKT_UNSTUFF);
+							showPkt(0, oPktInfo.sSrcname, oPktInfo.dPktTime,
+									sOutPkt, iOutPktLen, stderr, PKT_DUMP);
+						}
 
 						if (orbput(orbfd, oPktInfo.sSrcname, oPktInfo.dPktTime,
-								(char *) aBBAPkt, oPktInfo.iPktSize)) {
+								sOutPkt, iOutPktLen)) {
 							elog_complain(0, "orbput() failed in main()\n");
 							dcbbaCleanup(-1);
 						}
@@ -141,6 +153,9 @@ int main(int iArgCount, char *aArgList[]) {
 						if (oConfig.bVerboseModeFlag == TRUE)
 							elog_notify(0, "packet submitted under %s\n",
 									oPktInfo.sSrcname);
+
+						/* Free the packet */
+						free(sOutPkt);
 					}
 				}
 			}
@@ -231,7 +246,7 @@ int readFromDC(struct stBBAPacketInfo *oPktInfo, unsigned char *aBBAPkt) {
 		case ST_READ_HEADER: /* Wait for packet length in the header */
 			aBBAPkt[iPktCounter++] = cIn;
 			if (iPktCounter == BBA_CTRL_COUNT) {
-				usVal=0;
+				usVal = 0;
 				memcpy((char *) &usVal, &aBBAPkt[BBA_PSIZE_OFF], 2); /* packet size  */
 				if (usVal == 0) {
 					elog_complain(0,
@@ -258,16 +273,22 @@ int readFromDC(struct stBBAPacketInfo *oPktInfo, unsigned char *aBBAPkt) {
 						hexdump(stderr, aBBAPkt, iPktLength);
 
 					if (parseBBAPacket(aBBAPkt, oPktInfo) == RESULT_SUCCESS) {
+						/*
+						 * If the parsing was successful, return here.
+						 */
 						return RESULT_SUCCESS;
-						/* Put the packet into the orb */
-					} else
+					} else {
+						/*
+						 * Log an error and discard the packet
+						 */
 						elog_complain(0,
 								"parseBBAPacket was unable to parse the packet. Skipping.\n");
+					}
 				}
 				iReadState = ST_WAIT_FOR_SYNC;
 			}
 			if (iPktCounter >= oConfig.iBBAPktBufSz) {
-				complain(
+				elog_complain(
 						0,
 						"attempted to accumulate %d byte packet: too large for internal buffer\n",
 						iPktCounter);
@@ -278,16 +299,150 @@ int readFromDC(struct stBBAPacketInfo *oPktInfo, unsigned char *aBBAPkt) {
 		}
 
 	}
-	elog_complain(0, "main(): bnsget failed to read");
+	/*
+	 * If we get here, it means we encountered an unrecoverable error while reading the file handle/socket
+	 */
+	elog_log(0, "readFromDC(): bnsget failed to read");
 	return RESULT_FAILURE;
 }
 
 /*
- * Adds an orbheader to a BBA Packet read from the DC using data in oPktInfo
+ * Adds an orbheader to a BBA Packet read from the DC using data in oPktInfo. Does not modify the raw BBA Packet.
+ *
+ * Parameters:
+ * 	PktInfo
+ * 		Information about the packet extracted by parseBBAPacket
+ * 	BBAPktIn
+ * 		The raw packet read from the wire
+ * 	OrbPktOut
+ * 		Pointer to an array containing the orb packet
+ *
+ * Returns:
+ * 	The length of OrbPacketOut. This will be 0 if an error occurred, and OrbPktOut will be null.
  */
-int addOrbHeaderToBBA(struct stBBAPacketInfo *oPktInfo,
-		unsigned char **aInBBAPkt, char **sOutPkt) {
-	return RESULT_FAILURE;
+int addOrbHeaderToBBA(struct stBBAPacketInfo *PktInfo,
+		unsigned char *BBAPktIn, char **OrbPktOut) {
+
+	char *oNewPkt = 0;
+	double calib;
+	float fcalib, samprate;
+	struct stBBAPreHdr oPreHdr;
+	unsigned char hdr[512];
+	unsigned char hdrbuf[512];
+	unsigned char *phdr;
+	char sta[PKT_NAMESIZE], chan[512];
+	int nbytes, psize, chanlen;
+	short datatype, nsamp, nchan, chlen, hdrsize, hsiz;
+
+	/*
+	 * Initialization
+	 */
+	nbytes = 0; /* Initialize the byte counter */
+	phdr = &hdrbuf[0]; /* Initialize header pointer */
+	memset((char *) chan, 0, 64); /* Zero out the first 64 bytes of chan */
+
+	/*
+	 * Populate the pre-header struct
+	 * The fourth field, hdrsiz, is generated below after we assemble the main header
+	 */
+	oPreHdr.pkttype = (unsigned short) htons (PktInfo->usRawPktType);
+	oPreHdr.hdrtype = (unsigned short) htons (0xBBA); /* Fixed to BBA format */
+	oPreHdr.pktsiz = htons(PktInfo->iPktSize);
+
+	/*
+	 * Prepare to assemble the header
+	 * Retrieve channel information, station name, and calibration info
+	 */
+	nchan = PktInfo->iNChan;
+	strcpy(chan, PktInfo->sChNames);
+	chanlen = strlen(chan);
+	strcpy(sta, PktInfo->oSrcname.src_sta);
+	calib = 0; /* Always null for BBA packets, each channel has a cal factor instead */
+
+	/*
+	 * Start assembling the main header
+	 */
+
+	/* Put the calibration value into hdr */
+	fcalib = (float) calib;
+	htonfp(&fcalib, &fcalib);
+	memcpy(phdr, &fcalib, sizeof(float));
+	nbytes += sizeof(float);
+	phdr += sizeof(float);
+
+	/* Put the sample rate into the header */
+	htonfp(&PktInfo->fSrate, &samprate);
+	memcpy(phdr, &samprate, sizeof(float));
+	nbytes += sizeof(float);
+	phdr += sizeof(float);
+
+	/* Get the Trace code (from tr.h) for the data type */
+	if (strncmp(PktInfo->sDataType, "s2", 2) == 0) {
+		datatype = (short) trSHORT;
+	} else if (strncmp(PktInfo->sDataType, "s4", 2) == 0) {
+		datatype = (short) trINT;
+	} else if (strncmp(PktInfo->sDataType, "c0", 2) == 0) {
+		datatype = 0;
+	}
+	/* Put the data type into the header */
+	datatype = htons(datatype);
+	memcpy(phdr, &datatype, sizeof(short));
+	nbytes += sizeof(short);
+	phdr += sizeof(short);
+
+	/* Put the number of samples into the header */
+	nsamp = (short) htons(PktInfo->iNSamp);
+	memcpy(phdr, &nsamp, sizeof(short));
+	nbytes += sizeof(short);
+	phdr += sizeof(short);
+
+	/* Put the number of channels into the header */
+	nchan = (short) htons(PktInfo->iNChan);
+	memcpy(phdr, &nchan, sizeof(short));
+	nbytes += sizeof(short);
+	phdr += sizeof(short);
+
+	/* Put the BBA header size into the header */
+	hdrsize = (short) htons(PktInfo->iHdrSize);
+	memcpy(phdr, &hdrsize, sizeof(short));
+	nbytes += sizeof(short);
+	phdr += sizeof(short);
+
+	/* Put the length of the channel names into the header */
+	chlen = htons( (short) chanlen );
+	memcpy(phdr, &chlen, sizeof(short));
+	nbytes += sizeof(short);
+	phdr += sizeof(short);
+
+	/* Put the channel names into the header */
+	memcpy(phdr, chan, chanlen);
+	nbytes += chanlen;
+	phdr += chanlen;
+
+	/* Finalize the Pre Header */
+	hsiz = nbytes + sizeof(struct stBBAPreHdr);
+	psize = hsiz + ntohs(oPreHdr.pktsiz);
+	oPreHdr.hdrsiz = htons (hsiz);
+
+	/* Copy the pre header and the generated hdrbuf into hdr */
+	memcpy(&hdr[0], (char *) &oPreHdr, sizeof(struct stBBAPreHdr));
+	memcpy(&hdr[sizeof(struct stBBAPreHdr)], hdrbuf, nbytes);
+
+	/*
+	 * Build the ORB data packet
+	 */
+	allot( char *, oNewPkt, psize );
+	memcpy(oNewPkt, hdr, hsiz); /* Add the entire header, including the PreHdr */
+	memcpy(oNewPkt + hsiz, (char *) BBAPktIn, ntohs(oPreHdr.pktsiz)); /* Add data */
+
+	/*
+	 * If we get this far, the packet has been successfully generated
+	 *
+	 * Return the pointer to the newly generated packet in OrbPktOut
+	 * Finally, return the size of the packet in psize
+	 */
+	*OrbPktOut = oNewPkt;
+	return psize;
 }
 
 /*
@@ -425,7 +580,7 @@ int initSiteLookupArrays() {
 		oConfig.oStaName = newarr(0);
 		oConfig.oStaCh = newarr(0);
 	} else {
-		elog_complain(0, "Can't get site parameters. Check parameter file!\n");
+		elog_log(0, "Can't get site parameters. Check parameter file!\n");
 		return RESULT_FAILURE;
 	}
 
@@ -434,6 +589,7 @@ int initSiteLookupArrays() {
 		sRow = gettbl(oConfig.oSiteTbl, iRowIdx);
 		/* Parse it into it's component entries */
 		sscanf(sRow, STE_SCS, STE_RVL(&oSiteEntry));
+		free(sRow);
 
 		/* Handle the StaName table */
 		sprintf(sKey, "%d", oSiteEntry.iSID);
@@ -452,24 +608,24 @@ int initSiteLookupArrays() {
 			setarr(oConfig.oStaCh, sKey, oNewSiteEntry);
 		}
 	}
-		return RESULT_SUCCESS;
-	}
+	return RESULT_SUCCESS;
+}
 
-	/*
-	 * Reads the parameter file and initializes several lookup tables.
-	 */
-int paramFileRead() {
+/*
+ * Reads the parameter file and initializes several lookup tables.
+ */
+int paramFileRead(void) {
 	int ret; /* Return value from pfupdate */
 	static int iPFFirstRead = 1; /* Tracks whether or not this is the first read of the parameter file */
 
 	/* Read the parameter file */
 	if ((ret = pfupdate(oConfig.sParamFileName, &oConfig.oConfigPf)) < 0) {
 		/* An error occurred reading the parameter file */
-		complain(
+		elog_log(
 				0,
 				"pfupdate(\"%s\", oConfig.oConfigPf): failed to open config file.\n",
 				oConfig.sParamFileName);
-		exit(-1);
+		return RESULT_FAILURE;
 	} else if (ret == 1) {
 		/* We were able to successfully read the parameter file */
 
@@ -528,8 +684,8 @@ int getBBAStaFromSID(int iStaID, char *StaName) {
 	sprintf(sbuf, "%i", iStaID);
 	result = getarr(oConfig.oStaName, sbuf);
 	if (result == NULL) {
-		elog_complain(0,
-				"getBBAStaFromSID: unable to find StaName for StaID %i", iStaID);
+		elog_log(0, "getBBAStaFromSID: unable to find StaName for StaID %i",
+				iStaID);
 		return RESULT_FAILURE;
 	}
 	strcpy(StaName, result);
@@ -561,7 +717,7 @@ int getBBADataTypeFromSRate(float fSampleRate, char *sDataType) {
 
 	/* We shouldn't ever get here unless iSampleRate is way out of range or NULL*/
 	strcpy(sDataType, "");
-	elog_complain(
+	elog_log(
 			0,
 			"getBBADataTypeFromSRate: Unable to determine DataType from given sample rate of %f",
 			fSampleRate);
@@ -579,7 +735,7 @@ int dcDataConnect(int iConnType, char *sConnectionParams[]) {
 	/* Check for invalid params */
 	if ((sConnectionParams[0] == NULL) || ((iConnType == CONNECT_TCP_IP)
 			&& sConnectionParams[1] == NULL)) {
-		elog_complain(0, "dcDataConnect(): Bad connection parameters.   "
+		elog_log(0, "dcDataConnect(): Bad connection parameters.   "
 			"Expected '<host>,<port>' or "
 			"'<filename>'.\n");
 		return RESULT_FAILURE;
@@ -616,7 +772,7 @@ int dcDataConnect(int iConnType, char *sConnectionParams[]) {
 
 	/* If we failed too many times, log error */
 	if (iAttemptsMade >= MAX_CONNECT_ATTEMPTS) {
-		elog_complain(
+		elog_log(
 				0,
 				"dcDataConnect(): Aborting after %i failed connection attempts.\n",
 				iAttemptsMade);
@@ -642,7 +798,6 @@ int dcDataConnectSocket(char *sHost, in_port_t iPort) {
 	int iFH; /*Temporary filehandle that gets used to create the Bns structure */
 	struct hostent *oHostEnt;
 	struct sockaddr_in oAddress;
-	/*int					iSocketOptVal = 1; UNUSED, would be used if we set keepalive*/
 
 	/* Check for host already being a numeric IP address */
 	if ((iNetAddress = inet_addr(sHost)) != INADDR_NONE)
@@ -652,17 +807,18 @@ int dcDataConnectSocket(char *sHost, in_port_t iPort) {
 	else {
 		oHostEnt = gethostbyname(sHost);
 		if (oHostEnt == NULL) {
-			elog_complain(1,
+			elog_log(1,
 					"dcDataConnectSocket(): Could not resovle address '%s'.",
 					sHost);
 			return RESULT_FAILURE;
 		}
 		memcpy(&oAddress.sin_addr, oHostEnt -> h_addr, min (oHostEnt -> h_length, sizeof (oAddress.sin_addr)));
+		free(oHostEnt);
 	}
 
 	/* Create socket */
 	if ((iFH = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		elog_complain(1, "dcDataConnectSocket(): Could not create socket.");
+		elog_log(1, "dcDataConnectSocket(): Could not create socket.");
 		return RESULT_FAILURE;
 	}
 
@@ -702,7 +858,7 @@ int dcDataConnectFile(char *sFileName) {
 	/*  Attempt to open the file in Read-Only mode */
 	iFH = open(sFileName, O_RDONLY);
 	if (iFH < 0) {
-		elog_complain(1,
+		elog_log(1,
 				"dcDataConnectFile(): Unable to open dummy data file '%s'.",
 				sFileName);
 		return RESULT_FAILURE;
@@ -735,7 +891,7 @@ void sig_hdlr(int signo) {
  */
 int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength) {
 	unsigned short usPktChksum, usCalcChksum; /* Holds the checksum values */
-	unsigned short *usChksumPtr; /* Pointer for calculating the checksum */
+	unsigned short *pBBAPktChkSum; /* Pointer for calculating the checksum */
 
 	/* Go through the data portion of the packet one unsigned short at a time.
 	 * The checksum is calculated on the entire packet assuming
@@ -744,20 +900,20 @@ int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength) {
 
 	/* Initialize variables for checksum loop */
 	usCalcChksum = 0;
-	usChksumPtr = (unsigned short *) &aBBAPkt[0];
+	pBBAPktChkSum = (unsigned short *) &aBBAPkt[0];
 
 	/* Include the packet header bytes in usCalcChksum */
-	usCalcChksum ^= ntohs(*usChksumPtr++);
+	usCalcChksum ^= ntohs(*pBBAPktChkSum++);
 
 	/* Extract the checksum from the packet, and skip it in the calculated checksum */
-	usPktChksum = ntohs(*usChksumPtr++);
+	usPktChksum = ntohs(*pBBAPktChkSum++);
 
 	/*
 	 * We have now skipped forward enough that usChksumPtr should be pointing at the offset
 	 * for the packet size, so we need to iterate through the remainder of the packet
 	 */
-	for (; (int) usChksumPtr < ((int) &aBBAPkt[0] + iPktLength); usChksumPtr++) {
-		usCalcChksum ^= ntohs(*usChksumPtr);
+	for (; (int) pBBAPktChkSum < ((int) &aBBAPkt[0] + iPktLength); pBBAPktChkSum++) {
+		usCalcChksum ^= ntohs(*pBBAPktChkSum);
 	}
 
 	if (usCalcChksum != usPktChksum) {
@@ -776,7 +932,7 @@ int validateBBAChecksum(unsigned char *aBBAPkt, int iPktLength) {
  * 	aBBAPkt
  * 		The raw packet as read off the wire
  * 	oPktInfo
- * 		A pointer to a structure which will hold the extracted packet info
+ * 		A pointer to a pre-allocated struct stBBAPacketInfo which will hold the extracted packet info
  *
  * Returns:
  * 	RESULT_FAILURE if there's an error
@@ -798,50 +954,60 @@ int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
 
 	usBBAPktType = aBBAPkt[1];
 
-	usVal=0;
+	usVal = 0;
 	memcpy((char *) &usVal, &aBBAPkt[BBA_PSIZE_OFF], 2); /* packet size */
 	if (usVal == 0) {
-		elog_complain(0, "Wrong header. Zero packet size detected.\n");
+		elog_log(0,
+				"parseBBAPacket(): Wrong header. Zero packet size detected.\n");
 		return RESULT_FAILURE;
 	} else
 		oPktInfo->iPktSize = ntohs(usVal);
 
-	usVal=0;
+	usVal = 0;
 	memcpy((char *) &usVal, &aBBAPkt[BBA_STAID_OFF], 2); /* sta ID */
 	if (oPktInfo->iPktSize == 0) {
-		elog_complain(0, "Wrong header. Zero packet size detected.\n");
+		elog_log(0,
+				"parseBBAPacket(): Wrong header. Zero packet size detected.\n");
 		return RESULT_FAILURE;
 	} else
 		oPktInfo->iStaID = ntohs(usVal);
-	usVal=0;
+	usVal = 0;
 	memcpy((char *) &usVal, &aBBAPkt[BBA_NSAMP_OFF], 2); /* # of samples */
 	if (usVal == 0) {
-		elog_complain(0, "Wrong header. Zero number of samples detected.\n");
+		elog_log(0,
+				"parseBBAPacket(): Wrong header. Zero number of samples detected.\n");
 		return RESULT_FAILURE;
 	} else
 		oPktInfo->iNSamp = ntohs(usVal);
 
-	usVal=0;
+	usVal = 0;
 	memcpy((char *) &usVal, &aBBAPkt[BBA_SRATE_OFF], 2); /* Sample rate */
 	if (usVal == 0) {
-		elog_complain(0, "Wrong header. Zero sample rate detected.\n");
+		elog_log(0,
+				"parseBBAPacket(): Wrong header. Zero sample rate detected.\n");
 		return RESULT_FAILURE;
 	} else
 		oPktInfo->fSrate = ntohs(usVal);
 
-	usVal=0;
+	usVal = 0;
 	memcpy((char *) &usVal, &aBBAPkt[BBA_HSIZE_OFF], 2); /* header size */
 	if (usVal == 0) {
-		elog_complain(0, "Wrong header. Zero header size detected.\n");
+		elog_log(
+				0,
+				"parseBBAPacket(): parseBBAPacket(): Wrong header. Zero header size detected.\n");
 		return RESULT_FAILURE;
 	} else
 		oPktInfo->iHdrSize = ntohs(usVal);
 
 	oPktInfo->iNChan = aBBAPkt[BBA_NCHAN_OFF]; /* Number of channels */
 	if (oPktInfo->iNChan == 0) {
-		elog_complain(0, "Wrong header. Zero number of channels detected.\n");
+		elog_log(0,
+				"parseBBAPacket(): Wrong header. Zero number of channels detected.\n");
 		return RESULT_FAILURE;
 	}
+
+	/* Put raw packet type into oPktInfo */
+	oPktInfo->usRawPktType = (aBBAPkt[0] * 256) + aBBAPkt[1];
 
 	/* get data type */
 	switch (aBBAPkt[BBA_DTYPE_OFF]) {
@@ -859,7 +1025,7 @@ int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
 		strcpy(oPktInfo->sDataType, "c0");
 		break;
 	default:
-		elog_complain(0, "Can't recognize a data type %d(%02x)\n",
+		elog_log(0, "parseBBAPacket(): Can't recognize a data type %d(%02x)\n",
 				aBBAPkt[BBA_DTYPE_OFF], aBBAPkt[BBA_DTYPE_OFF]);
 		return RESULT_FAILURE;
 	}
@@ -869,7 +1035,7 @@ int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
 	e2h(dYTime, &iYear, &iDay, &iHour, &iMin, &dSec);
 	dPTime = epoch(iYear * 1000);
 
-	ysec=0;
+	ysec = 0;
 	memcpy((char *) &ysec, &aBBAPkt[BBA_TIME_OFF], 4);
 	oPktInfo->dPktTime = dPTime + ntohl(ysec);
 
@@ -879,41 +1045,58 @@ int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
 
 	/* Subcode and Station Name */
 	switch (aBBAPkt[1]) {
+
 	case BBA_DAS_DATA: /* Data Packets */
+
 		/* Get the subcode from the sample rate */
 		if (getBBADataTypeFromSRate(oPktInfo->fSrate, sTMPNameCmpt)
 				== RESULT_FAILURE) {
-			elog_complain(0, "Lookup of Subcode from Sample Rate failed.\n");
+			elog_log(0,
+					"parseBBAPacket(): Lookup of Subcode from Sample Rate failed.\n");
 			return RESULT_FAILURE;
 		}
 		strcpy(oPktInfo->oSrcname.src_subcode, sTMPNameCmpt);
 
 		/* Get the station name, reusing sTMPNameCmpt */
 		if (getBBAStaFromSID(oPktInfo->iStaID, sTMPNameCmpt) == RESULT_FAILURE) {
-			elog_complain(0, "Lookup of Station Name Failed.\n");
+			elog_log(0, "parseBBAPacket(): Lookup of Station Name Failed.\n");
 			return RESULT_FAILURE;
 		}
 		break;
+
 	case BBA_DAS_STATUS: /* DAS Status Packets */
+
 		strcpy(oPktInfo->oSrcname.src_subcode, "DAS");
+
+		/* Get the station name */
 		if (getBBAStaFromSID(oPktInfo->iStaID, sTMPNameCmpt) == RESULT_FAILURE) {
-			elog_complain(0, "Lookup of Station Name Failed.\n");
+			elog_log(0, "parseBBAPacket(): Lookup of Station Name Failed.\n");
 			return RESULT_FAILURE;
 		}
 		break;
+
 	case BBA_DC_STATUS: /* DC Status Packets */
+
 		strcpy(oPktInfo->oSrcname.src_subcode, "DC");
+
+		/* Get the station name
+		 * For whatever reason, the original ipd2 uses the raw Station ID field
+		 * rather than doing a station name lookup
+		 */
 		sprintf(sTMPNameCmpt, "%d", oPktInfo->iStaID);
 		break;
+
 	case BBA_RTX_STATUS: /* RTX Status Packets */
+
+		/* Get the station name */
 		strcpy(oPktInfo->oSrcname.src_subcode, "RTX");
 		if (getBBAStaFromSID(oPktInfo->iStaID, sTMPNameCmpt) == RESULT_FAILURE) {
-			elog_complain(0, "Lookup of Station Name Failed.\n");
+			elog_log(0, "Lookup of Station Name Failed.\n");
 			return RESULT_FAILURE;
 		}
 		break;
 	default:
-		elog_complain(0, "Can't recognize a data packet type - %d(%02x)\n",
+		elog_log(0, "Can't recognize a data packet type - %d(%02x)\n",
 				aBBAPkt[1], aBBAPkt[1]);
 		return RESULT_FAILURE;
 	}
@@ -926,7 +1109,8 @@ int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
 
 	join_srcname(&oPktInfo->oSrcname, oPktInfo->sSrcname);
 	if (oConfig.bVerboseModeFlag)
-		printf("Sourcename evaluates to %s\n", oPktInfo->sSrcname);
+		elog_debug(1, "parseBBAPacket(): Sourcename evaluates to %s\n",
+				oPktInfo->sSrcname);
 
 	/*
 	 * Extract channel information
@@ -943,18 +1127,22 @@ int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
 
 	iDataOffset = oPktInfo->iHdrSize;
 	for (i = 0, iChIdx = 0; i < oPktInfo->iNChan; i++) {
-		usVal=0;
-		memcpy((char *) &usVal, &aBBAPkt[iDataOffset], 1); /* header size */
-		iChId = ntohs(usVal);
+		//usVal = 0;
+		//memcpy((char *) &usVal, &aBBAPkt[iDataOffset], 1); /* header size */
+		//iChId = ntohs(usVal);
+		iChId = aBBAPkt[iDataOffset];
 
-		usVal=0;
+		usVal = 0;
 		memcpy((char *) &usVal, &aBBAPkt[iDataOffset + BBA_CHBYTES_OFF], 2);
 		iChBytes = ntohs(usVal);
 
 		sChName = getBBAChNameFromId(usBBAPktType,
 				oPktInfo->oSrcname.src_subcode, oPktInfo->iStaID, iChId);
-		if (sChName == 0)
+		if (sChName == 0) {
+			elog_complain(0,
+					"parseBBAPacket(): an error occured retrieving the channel name");
 			return RESULT_FAILURE;
+		}
 		strcat(aChan, sChName);
 		iChIdx += strlen(sChName);
 		free(sChName);
@@ -1003,11 +1191,11 @@ char *getBBAChNameFromId(unsigned short usBBAPktType, char *sSubCode,
 		sprintf(key, "BBA/%s_%d_%d", sSubCode, iStaId, iChId);
 		if ((oSiteEntry = (struct stSiteEntry *) getarr(oConfig.oStaCh, key))
 				!= 0) {
-			name = strdup(oSiteEntry->sSENS);
+			name = oSiteEntry->sSENS;
 		} else {
 			/* We can't find an entry so we'll make up a fake channel Id */
 			sprintf(&key[0], "%s_%d", sSubCode, iChId);
-			name = strdup(key);
+			name = key;
 
 			/* To prevent excessive noise in the logs, only complain
 			 * if we haven't tried looking this up before */
@@ -1029,7 +1217,7 @@ char *getBBAChNameFromId(unsigned short usBBAPktType, char *sSubCode,
 
 		sprintf(key, "%d", iChId);
 		if ((name = getarr(oConfig.oDasID, key)) == 0) {
-			elog_complain(
+			elog_log(
 					0,
 					"getBBAChNameFromId: can't get DAS parameter name (StaID=%d, ChId=%d)\n",
 					iStaId, iChId);
@@ -1040,7 +1228,7 @@ char *getBBAChNameFromId(unsigned short usBBAPktType, char *sSubCode,
 
 		sprintf(key, "%d", iChId);
 		if ((name = getarr(oConfig.oDcID, key)) == 0) {
-			elog_complain(
+			elog_log(
 					0,
 					"getBBAChNameFromId: can't get DC parameter name (StaID=%d, ChId=%d)\n",
 					iStaId, iChId);
@@ -1051,7 +1239,7 @@ char *getBBAChNameFromId(unsigned short usBBAPktType, char *sSubCode,
 
 		sprintf(key, "%d", iChId);
 		if ((name = getarr(oConfig.oRTXID, key)) == 0) {
-			elog_complain(
+			elog_log(
 					0,
 					"getBBAChNameFromId: can't get RTX parameter name (StaID=%d, ChId=%d)\n",
 					iStaId, iChId);

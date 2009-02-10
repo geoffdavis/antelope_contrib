@@ -92,8 +92,8 @@ struct stConfigData {
 	char *sDCConnectionParams [3];	/* Array to hold connection parameters for the Data concentrator */
 	char *sDCControlPort;			/* Port number for the data concentrator's control port */
 	char *sParamFileName;			/* Parameter File Name */
-	char *sStateFileName;
-	Pf *oConfigPf;
+	char *sStateFileName;			/* State file name - Unused currently */
+	Pf *oConfigPf;					/* Pf struct holding the configuration as read from sParamFileName */
 	Tbl *oSiteTbl;					/* Tbl 'Site' as read from sParamFileName */
 	Arr *oStaName;					/* List of station names by DAS/Station Id */
 	Arr *oStaCh;					/* List of Site structs by PktType, SID, and SensorID */
@@ -104,10 +104,11 @@ struct stConfigData {
 };
 
 struct stBBAPacketInfo {
+	unsigned short usRawPktType;
 	Srcname oSrcname;	/* Struct containing Net/Sta/Chan info */
-	char sSrcname[500];		/* String to hold generated source name derived from oSrcname */
-	double dPktTime;		/* Packet Timestamp */
-	int iPktSize;			/* Packet Size in Bytes */
+	char sSrcname[500];	/* String to hold generated source name derived from oSrcname */
+	double dPktTime;	/* Packet Timestamp */
+	int iPktSize;		/* Packet Size in Bytes */
 	int iStaID;			/* Station ID - needs to be translated to a string via the parameter file */
 	int iNSamp;			/* Packet Size in Bytes */
 	int iNChan;			/* Number of Channels */
@@ -117,7 +118,7 @@ struct stBBAPacketInfo {
     char sPktType[12];  /* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
     char sHdrType[12];	/* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
     char sNetType[32];	/* Net type  */
-    char sChNames[128]; /* Names of the channels */
+    char sChNames[128]; /* Names of the channels, formatted for the orb header */
 };
 
 #define TRIM(s,l) {int i;for(i=l-1;i>0,s[i-1]==' ';i--);s[i]='\0';}
