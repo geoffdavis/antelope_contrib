@@ -114,10 +114,8 @@ struct stBBAPacketInfo {
 	int iNChan;			/* Number of Channels */
 	float fSrate;		/* Sample Rate */
 	int iHdrSize;		/* Size of the header before the data points */
-    char sDataType[4];
+    char sDataType[4];	/* Data type of packet in orb header format. One of: s2, s4, t4, c0 */
     char sPktType[12];  /* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
-    char sHdrType[12];	/* Pkt type - UCSDDP,UCSDSP, UCSDCP,etc*/
-    char sNetType[32];	/* Net type  */
     char sChNames[128]; /* Names of the channels, formatted for the orb header */
 };
 
@@ -145,10 +143,10 @@ TRIM((SP)->sDTYPE,11);TRIM((SP)->sNAME,7); TRIM((SP)->sSENS,11)
 
 /* Client Packet headers . Do NOT move around structure fields! */
 struct stBBAPreHdr {
-    short           hdrsiz;	       /* header size */
-    short           pktsiz;	       /* raw packet size */
-    unsigned short  hdrtype;	   /* header type  */
-    unsigned short  pkttype;	   /* packet type tag  */
+    int16_t   hdrsiz;	   /* header size */
+    int16_t   pktsiz;	   /* raw packet size */
+    uint16_t  hdrtype;	   /* header type  */
+    uint16_t  pkttype;	   /* packet type tag  */
 };
 
 #endif
