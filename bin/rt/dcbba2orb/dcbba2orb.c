@@ -50,7 +50,7 @@
 /*
  * Constants
  */
-#define VERSION "dcbba2orb 0.9"
+#define VERSION "dcbba2orb 1.0.0"
 /* State variables for use in readFromDC() */
 #define ST_WAIT_FOR_SYNC 0
 #define ST_READ_PKTTYPE 1
