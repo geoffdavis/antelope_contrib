@@ -1,8 +1,41 @@
-.TH DCBBA2ORB 1 "$Date: 2007/08/23 16:24:12 $"
+.TH DCBBA2ORB 1 "2/17/2009"
 .SH NAME
 dcbba2orb \- acquire data from an IGPP Data Concentrator to an ORB
 .SH SYNOPSIS
 .nf
+dcbba2orb [-V] [-v] -a dcipaddr | -t testfilename [-d dcdataport] [-o orbname] [-g paramfile]
+.fi
+.SH DESCRIPTION
+dcbba2orb acquires data in the BBA packet format from multiple data loggers connected to an IGPP Data Concentrator. Once a packet is acquired from the Data Concentrator, the various numeric field codes are translated according to tables in the parameter file. Data packets, Data Concentrator status packets, Reftek data logger status packets, and receive/transmit status packets are supported.
+.SH OPTIONS
+.IP "-V"
+Print version and usage, then exit
+.IP "-v"
+Verbose mode (use this option to see details on what dcbba2orb is doing)
+.IP "-a dcipaddr"
+Hostname or IP address of the Data concentrator to acquire data from. Either this option or -t must be specified.
+.IP "-t testfilename"
+File containing sample data for testing data acquisition. The best way to generate one of these files is using \fBtcpdump(1)\fP or \fBsnoop(1)\fP to record an existing data logger output, and then extract just the data fields of the packets using a tool like \fBwireshark(1)\fP.
+.IP "-d dcdataport"
+Port number of the data port on the data concentrator - defaults to \fI5000\fP.
+.IP "-o orbname"
+Name of the orb to output data packets to
+.IP "-g paramfile"
+Parameter file name. Defaults to dcbba2orb.pf
+.SH ORB OUTPUT PACKETS
+dcbba2orb outputs packets in the BBA packet format, with a special orb header that translates numeric station ids and channel ids to text-based station and channel names in the SEED format. Because the data loggers can be configured in a variety of manners, the ID to name mapping is defined in the parameter file.
+.SH PARAMETER FILE
+The dcbba2orb parameter file contains much of the information necessary to for connecto to and acquiring data from an IGPP data concentrator. Following is the default dcbba2orb parameter file.
+.in 2c
+.ft CW
+.nf
+.ps 8
+
+#
+# This dcbba2orb parameter file is used to specify the settings needed to 
+# communicate with an IGPP data concentrator.
+#
+
 Network_Name  AZ        # Name of the SEED network to use
 
 #
@@ -203,15 +236,18 @@ dcbba2orb -o $ORB -a 172.16.4.250
 .ft R
 .in
 .SH DIAGNOSTICS
-.IP readFromDC(): state=ST_WAIT_FOR_SYNC, discarding character 'R' = 52
+.IP "readFromDC(): state=ST_WAIT_FOR_SYNC, discarding character 'R' = 52"
 Typically, this message shows up when the program first connects to the Data Concentrator before the first data packet is received. The data concentrator prints out "RESET RESET   v071002 00005020 RESET RESET" before sending it's first data packet. If a number of these messages show up displaying characters other than the reset message, there may be communications errors or you might not actually be talking to a data concentrator.
-.IP readFromDC(): bnsget failed to read
+.IP "readFromDC(): bnsget failed to read"
 This error is printed if the connection to the data concentrator fails (socket closed) or if an EOF is encountered while reading a test file with the -f option.
 
 .SH "SEE ALSO"
-.nf
+.LP
 ipd2(1)
+.LP
 ucp2(1)
+.IP "IGPP Data Concentrator and the BBA Packet Format"
+Web page available from the USARRAY ANF team - please contact anfsysadmins@anfmon.ucsd.edu for a copy.
 .fi
 .SH "BUGS AND CAVEATS"
 .LP
