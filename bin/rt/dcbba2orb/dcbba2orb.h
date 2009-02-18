@@ -40,6 +40,7 @@
 #define DEFAULT_DC_DATA_PORT 	"5000"
 #define DEFAULT_DC_CONTROL_PORT "5001"
 #define DEFAULT_PARAM_FILE		"dcbba2orb.pf"
+#define PFVER					"1.0"
 #define RESULT_SUCCESS          0
 #define RESULT_FAILURE          -1
 #define INVALID_HANDLE          -1
@@ -86,6 +87,7 @@
  */
 struct stConfigData {
 	int bVerboseModeFlag;			/* Print debug information */
+	int bPFValidateFlag;			/* Validate the parameter file and exit if true */
 	int iConnectionType;			/* Connection type - either CONNECT_TCP_IP or CONNECT_FILE */
 	char *sNetworkName;				/* Network code - AZ, TA, etc */
 	char *sOrbName;					/* Orbserver to output packets to */

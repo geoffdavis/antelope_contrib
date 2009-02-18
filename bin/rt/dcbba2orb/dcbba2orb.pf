@@ -1,4 +1,15 @@
-Network_Name  AZ
+#
+# This dcbba2orb parameter file is used to specify the settings needed to 
+# communicate with an IGPP data concentrator.
+#
+
+#
+# Starting with dcbba2orb 1.0.1, dcbba2orb expects a configuration file 
+# version in order to verify that data formats are compatible
+#
+dcbba2orb_pf_ver        1.0     # Required, pf format version
+
+Network_Name            AZ      # Name of the SEED network to use
 
 #DTYPE    SID NAME    COMP   SENS       CALIB
 Site &Tbl{
