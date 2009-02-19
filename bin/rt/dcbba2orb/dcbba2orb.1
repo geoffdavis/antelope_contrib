@@ -1,29 +1,35 @@
-.TH DCBBA2ORB 1 "$Date$"
+.TH DCBBA2ORB 1 "Feb 18, 2009"
 .SH NAME
 dcbba2orb \- acquire data from an IGPP Data Concentrator to an ORB
 .SH SYNOPSIS
 .nf
-\fBdcbba2orb \fP[-V] [-v] -a \fIdcipaddr\fP | -t \fItestfilename\fP [-d
-                \fIdcdataport\fP] [-o \fIorbname\fP] [-g \fIparamfile\fP]
+\fBdcbba2orb \fP[-V|--usage] [-r|--validatepf] [-v|--verbose] [--brief]
+                -a \fIDC_IP_ADDRESS\fP|--dcaddress=\fIDC_IP_ADDRESS\fP|-t
+                \fITEST_FILE_NAME\fP|--testfile=\fITEST_FILENAME\fP
+                [-d \fIDC_DATA_PORT\fP|--dcdataport=\fIDC_DATA_PORT\fP]
+                [-o \fIDATA_ORB_NAME\fP|--dataorb=\fIDATA_ORB_NAME\fP]
+                [-g \fIPARAM_FILENAME\fP|--pf=\fIPARAM_FILENAME\fP]
 .fi
 .SH DESCRIPTION
 \fBdcbba2orb\fP acquires data in the BBA packet format from multiple data loggers connected to an IGPP Data Concentrator. Once a packet is acquired from the Data Concentrator, the various numeric field codes are translated according to tables in the parameter file. Data packets, Data Concentrator status packets, Reftek data logger status packets, and receive/transmit status packets are supported.
 .SH OPTIONS
-.IP "-V"
+.IP "-V, --usage"
 Print version and usage, then exit
-.IP "-r"
+.IP "-r, --validatepf"
 Validate parameter file, then exit
-.IP "-v"
-Verbose mode (use this option to see details on what \fBdcbba2orb\fP is doing)
-.IP "-a dcipaddr"
+.IP "-v, --verbose"
+Verbose mode (use this option to see details on what \fBdcbba2orb\fP is doing). This option can be negated with --brief.
+.IP "--brief"
+Opposite of verbose. Used to negate --verbose. This is the default.
+.IP "-a <ipaddress>, --dcaddress=<ipaddress>"
 Hostname or IP address of the Data concentrator to acquire data from. Either this option or -t must be specified.
-.IP "-t testfilename"
+.IP "-t <filename>, --testfile=<filename>"
 File containing sample data for testing data acquisition. The best way to generate one of these files is using \fBtcpdump(1)\fP or \fBsnoop(1)\fP to record an existing data logger output, and then extract just the data fields of the packets using a tool like \fBwireshark(1)\fP.
-.IP "-d dcdataport"
+.IP "-d <port>, --dataport=<port>"
 Port number of the data port on the data concentrator - defaults to \fI5000\fP.
-.IP "-o orbname"
+.IP "-o <orbname>, --dataorb=<orbname>"
 Name of the orb to output data packets to
-.IP "-g paramfile"
+.IP "-g paramfile, --pf=<filename>"
 Parameter file name. Defaults to \fBdcbba2orb\fP.pf
 .SH ORB OUTPUT PACKETS
 dcbba2orb outputs packets in the BBA packet format, with a special orb header that translates numeric station ids and channel ids to text-based station and channel names in the SEED format. Because the data loggers can be configured in a variety of manners, the ID to name mapping is defined in the parameter file.
@@ -35,7 +41,7 @@ Following is the default \fBdcbba2orb\fP parameter file.
 .ft CW
 .nf
 
-.ne 7
+.ne 8
 
 .ps 8
 

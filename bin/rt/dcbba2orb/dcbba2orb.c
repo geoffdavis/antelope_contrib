@@ -547,7 +547,11 @@ int stuffBBAPkt(struct stBBAPacketInfo *PktInfo, unsigned char *BBAPktIn,
 void showCommandLineUsage(void) {
 	cbanner(
 			VERSION,
-			" [-V] [-r] [-v] [-a dcipaddr | -t testfilename ] [-d dcdataport] [-o orbname] [-g paramfile]",
+			" [-V|--usage] [-r|--validatepf] [-v|--verbose] [--brief] "
+			"-a DC_IP_ADDRESS|--dcaddress=DC_IP_ADDRESS|-t TEST_FILE_NAME|--testfile=TEST_FILENAME "
+			"[-d DC_DATA_PORT|--dcdataport=DC_DATA_PORT] "
+			"[-o DATA_ORB_NAME|--dataorb=DATA_ORB_NAME] "
+			"[-g PARAM_FILENAME|--pf=PARAM_FILENAME]",
 			"Geoff Davis", "IGPP, UCSD", "gadavis@ucsd.edu");
 }
 
@@ -569,16 +573,17 @@ int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
 			/* These options don't set a flag. We distinguish them by their indices. */
 			{ "usage", no_argument, 0, 'V' },
 			{ "dcaddress", required_argument, 0, 'a' },
-			{ "data-port", required_argument, 0, 'd' },
-			{ "control-port", required_argument, 0, 'c' },
-			{ "data-orb", required_argument, 0, 'o' },
+			{ "dataport", required_argument, 0, 'd' },
+			{ "controlport", required_argument, 0, 'c' },
+			{ "dataorb", required_argument, 0, 'o' },
 			{ "pf", required_argument, 0, 'g' },
-			{ "state", required_argument, 0, 's' },
+			{ "statefile", required_argument, 0, 's' },
 			{ "testfile", required_argument, 0, 's' },
 			{ 0, 0, 0, 0 } };
 
 	/* Initialize the CONFIG structure */
 	oConfig.bVerboseModeFlag = FALSE;
+	oConfig.bPFValidateFlag = FALSE;
 	oConfig.iConnectionType = CONNECT_TCP_IP;
 	oConfig.sDCConnectionParams[0] = "";
 	oConfig.sDCConnectionParams[1] = DEFAULT_DC_DATA_PORT;
