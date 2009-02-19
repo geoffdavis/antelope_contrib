@@ -24,6 +24,7 @@
 #include "orb.h"
 #include "forb.h"
 #include "stock.h"
+#include "getopt.h"
 /*
  * Constants
  */

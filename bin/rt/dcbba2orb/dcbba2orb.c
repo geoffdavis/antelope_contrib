@@ -50,7 +50,7 @@
 /*
  * Constants
  */
-#define VERSION "dcbba2orb 1.0.1"
+#define VERSION "dcbba2orb 1.0.2"
 /* State variables for use in readFromDC() */
 #define ST_WAIT_FOR_SYNC 0
 #define ST_READ_PKTTYPE 1
@@ -123,8 +123,10 @@ int main(int iArgCount, char *aArgList[]) {
 
 		/* Exit if bPFValidateFlag is set */
 		if (oConfig.bPFValidateFlag == TRUE) {
-			elog_notify(0,
-					"main(): Parameter File %s validated successfully. Exiting.", oConfig.sParamFileName);
+			elog_notify(
+					0,
+					"main(): Parameter File %s validated successfully. Exiting.",
+					oConfig.sParamFileName);
 			dcbbaCleanup(0);
 		}
 
@@ -556,8 +558,24 @@ void showCommandLineUsage(void) {
  */
 int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
 	int iOption = '\0';
+	int iLongOptIdx = 0;
 	int bAddressSet = FALSE;
 	int bDataFileSet = FALSE;
+	static struct option oLongOpts[] = {
+			/* These options set a flag */
+			{ "verbose", no_argument, &oConfig.bVerboseModeFlag, TRUE},
+			{ "brief",	no_argument, &oConfig.bVerboseModeFlag, FALSE},
+			{ "validatepf", no_argument, &oConfig.bPFValidateFlag, TRUE},
+			/* These options don't set a flag. We distinguish them by their indices. */
+			{ "usage", no_argument, 0, 'V' },
+			{ "dcaddress", required_argument, 0, 'a' },
+			{ "data-port", required_argument, 0, 'd' },
+			{ "control-port", required_argument, 0, 'c' },
+			{ "data-orb", required_argument, 0, 'o' },
+			{ "pf", required_argument, 0, 'g' },
+			{ "state", required_argument, 0, 's' },
+			{ "testfile", required_argument, 0, 's' },
+			{ 0, 0, 0, 0 } };
 
 	/* Initialize the CONFIG structure */
 	oConfig.bVerboseModeFlag = FALSE;
@@ -573,8 +591,32 @@ int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
 	oConfig.iBBAPktBufSz = DEFAULT_BBA_PKT_BUF_SZ;
 
 	/* Loop through all possible options */
-	while ((iOption = getopt(iArgCount, aArgList, "vVra:d:c:o:g:s:t:")) != -1) {
+	while ((iOption = getopt_long(iArgCount, aArgList, "vVra:d:c:o:g:s:t:",
+			oLongOpts, &iLongOptIdx)) != -1) {
+		if (iOption == 0) { /* Parse long options */
+
+			if (oLongOpts[iLongOptIdx].flag != 0) {
+				/* If this option set a flag, do nothing else now */
+				break;
+			}
+			/*
+			 * Handle options that don't set a flag
+			 */
+
+			/*
+			 * If there was a long option without a corresponding short option
+			 * that didn't set a flag either, we would handle it here and break
+			 */
+
+			/*
+			 * Handle long options with corresponding short option by passing
+			 * them off to the switch statement below
+			 */
+			iOption = oLongOpts[iLongOptIdx].val;
+		}
 		switch (iOption) {
+		case 0:
+			break; /* This long option was handled above so don't do anything */
 		case 'V':
 			showCommandLineUsage();
 			return RESULT_FAILURE;
@@ -593,7 +635,7 @@ int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
 		case 'c': /* Port number of the control port on the DC */
 			oConfig.sDCConnectionParams[2] = optarg;
 			break;
-		case 'o': /* Orb Name */
+		case 'o': /* Data Orb Name */
 			oConfig.sOrbName = optarg;
 			break;
 		case 'g':
@@ -626,7 +668,8 @@ int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
 	elog_notify(0, "%s\n", VERSION);
 
 	/* Verify valid command line options & combinations */
-	if ((bAddressSet == FALSE) && (bDataFileSet == FALSE) && (oConfig.bPFValidateFlag == FALSE)) {
+	if ((bAddressSet == FALSE) && (bDataFileSet == FALSE)
+			&& (oConfig.bPFValidateFlag == FALSE)) {
 		elog_complain(0,
 				"parseCommandLineOptions(): No address for Data Concentrator specified.\n");
 		showCommandLineUsage();
