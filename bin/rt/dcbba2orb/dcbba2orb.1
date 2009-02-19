@@ -63,7 +63,6 @@ Network_Name  AZ        # Name of the SEED network to use
 #
 # The site table maps station and channel ID numbers to names
 # This table is used for DAS data packets (type DAAB)
-# The calib field is not used but is kept for legacy purposes
 #
 Site &Tbl{
 #DTYPE    SID NAME    COMP   SENS       CALIB
@@ -246,7 +245,8 @@ The parameter file consists of a default value for the SEED network code and sev
 .IP \fINetwork_Name\fP
 This is the default SEED network code for data acquired from the data logger.
 .IP \fISite\fP
-The site table maps station and channel ID numbers to names. It is used for DAS data packets (type DAAB). It consists of the following columns: Data type (DTYPE), Station ID (SID), Station Name (NAME), Channel ID (COMP), Sensor Name (SENS), and Calibration factor (CALIB). The CALIB column is not used but is kept for compatibility with the now defunct \fBipd2(1)\fP \fIpkt.pf\fP parameter file.
+The site table maps station and channel ID numbers to names. It is used for DAS data packets (type DAAB). It consists of the following columns: Data type (DTYPE), Station ID (SID), Station Name (NAME), Channel ID (COMP), and Sensor Name (SENS).
+\fBNOTE:\fP The CALIB column was removed in version 1.1 of the parameter file.
 .IP \fIDas_Stat\fP
 Das_Stat is an array containing channel number to name mappings for DAS status packets (type DABC). It typically does not change, but is included in the parameter file in case further refinements to the data concentrator are made.
 .IP \fIDC_Stat\fP

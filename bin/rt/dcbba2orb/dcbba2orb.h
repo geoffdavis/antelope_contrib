@@ -41,7 +41,7 @@
 #define DEFAULT_DC_DATA_PORT 	"5000"
 #define DEFAULT_DC_CONTROL_PORT "5001"
 #define DEFAULT_PARAM_FILE		"dcbba2orb.pf"
-#define PFVER					"1.0"
+#define PFVER					"1.1"
 #define RESULT_SUCCESS          0
 #define RESULT_FAILURE          -1
 #define INVALID_HANDLE          -1
@@ -131,18 +131,17 @@ struct stSiteEntry {
 	char sNAME[8];			/* Site name */
 	int iCOMP;				/* Sensor ID, referred to as sensid in old _pkt2.h */
 	char sSENS[12];			/* Sensor name */
-	double dCALIB;			/* calibration coef */
 };
 
 /* Definition for reading&trimming&writing the structure  */
 
 #define STE_RVL(SP)  \
-(SP)->sDTYPE,&(SP)->iSID,(SP)->sNAME,&(SP)->iCOMP,(SP)->sSENS, &(SP)->dCALIB
+(SP)->sDTYPE,&(SP)->iSID,(SP)->sNAME,&(SP)->iCOMP,(SP)->sSENS
 
 #define STE_TRIM(SP) \
 TRIM((SP)->sDTYPE,11);TRIM((SP)->sNAME,7); TRIM((SP)->sSENS,11)
 
-#define STE_SCS " %s %d %s %d %s %lf[^\n] \n"
+#define STE_SCS " %s %d %s %d %s[^\n] \n"
 
 /* Client Packet headers . Do NOT move around structure fields! */
 struct stBBAPreHdr {
