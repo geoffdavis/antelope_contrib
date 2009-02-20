@@ -2,7 +2,7 @@
  *
  * dcbba2orb/dcbba2orb.h
  *
- * INclude file of constatns, macors, function declarations, etc.
+ * Include file of constants, macros, function declarations, etc.
  *
  *
  * Author: Geoff Davis

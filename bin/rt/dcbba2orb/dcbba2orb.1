@@ -1,4 +1,4 @@
-.TH DCBBA2ORB 1 "Feb 18, 2009"
+.TH DCBBA2ORB 1 "Feb 20, 2009"
 .SH NAME
 dcbba2orb \- acquire data from an IGPP Data Concentrator to an ORB
 .SH SYNOPSIS
@@ -11,7 +11,7 @@ dcbba2orb \- acquire data from an IGPP Data Concentrator to an ORB
                 [-g \fIPARAM_FILENAME\fP|--pf=\fIPARAM_FILENAME\fP]
 .fi
 .SH DESCRIPTION
-\fBdcbba2orb\fP acquires data in the BBA packet format from multiple data loggers connected to an IGPP Data Concentrator. Once a packet is acquired from the Data Concentrator, the various numeric field codes are translated according to tables in the parameter file. Data packets, Data Concentrator status packets, Reftek data logger status packets, and receive/transmit status packets are supported.
+\fBdcbba2orb\fP acquires data in the BBA packet format from multiple RefTek 72A-series data loggers (with custom firmware) connected to an IGPP Data Concentrator. Once a packet is acquired from the Data Concentrator, the various numeric field codes are translated according to tables in the parameter file. Data packets, Data Concentrator (DC) status packets, Reftek data logger (DAS) status packets, and retransmission status (RTX) packets are supported.
 .SH OPTIONS
 .IP "-V, --usage"
 Print version and usage, then exit
