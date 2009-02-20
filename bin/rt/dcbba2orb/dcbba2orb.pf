@@ -181,6 +181,11 @@ DC_Stat &Arr{
   14   SEND
   15   RSR
 }
+
+#
+# RTX_Stat is the definition of channels for Retransmission status packets (type DADE)
+# The following is version 1.00 of the RTX status packet
+# 
 RTX_Stat &Arr{
   1 	RTXREQ
   2		RTXRCV
