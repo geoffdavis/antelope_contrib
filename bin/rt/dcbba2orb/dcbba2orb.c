@@ -50,7 +50,7 @@
 /*
  * Constants
  */
-#define VERSION "dcbba2orb 1.1.0"
+#define VERSION "dcbba2orb 1.1.1"
 /* State variables for use in readFromDC() */
 #define ST_WAIT_FOR_SYNC 0
 #define ST_READ_PKTTYPE 1
@@ -548,11 +548,11 @@ void showCommandLineUsage(void) {
 	cbanner(
 			VERSION,
 			" [-V|--usage] [-r|--validatepf] [-v|--verbose] [--brief] "
-			"-a DC_IP_ADDRESS|--dcaddress=DC_IP_ADDRESS|-t TEST_FILE_NAME|--testfile=TEST_FILENAME "
-			"[-d DC_DATA_PORT|--dcdataport=DC_DATA_PORT] "
-			"[-o DATA_ORB_NAME|--dataorb=DATA_ORB_NAME] "
-			"[-g PARAM_FILENAME|--pf=PARAM_FILENAME]",
-			"Geoff Davis", "IGPP, UCSD", "gadavis@ucsd.edu");
+				"-a DC_IP_ADDRESS|--dcaddress=DC_IP_ADDRESS|-t TEST_FILE_NAME|--testfile=TEST_FILENAME "
+				"[-d DC_DATA_PORT|--dcdataport=DC_DATA_PORT] "
+				"[-o DATA_ORB_NAME|--dataorb=DATA_ORB_NAME] "
+				"[-g PARAM_FILENAME|--pf=PARAM_FILENAME]", "Geoff Davis",
+			"IGPP, UCSD", "gadavis@ucsd.edu");
 }
 
 /*
@@ -566,20 +566,16 @@ int parseCommandLineOptions(int iArgCount, char *aArgList[]) {
 	int bAddressSet = FALSE;
 	int bDataFileSet = FALSE;
 	static struct option oLongOpts[] = {
-			/* These options set a flag */
-			{ "verbose", no_argument, &oConfig.bVerboseModeFlag, TRUE},
-			{ "brief",	no_argument, &oConfig.bVerboseModeFlag, FALSE},
-			{ "validatepf", no_argument, &oConfig.bPFValidateFlag, TRUE},
-			/* These options don't set a flag. We distinguish them by their indices. */
-			{ "usage", no_argument, 0, 'V' },
-			{ "dcaddress", required_argument, 0, 'a' },
-			{ "dataport", required_argument, 0, 'd' },
-			{ "controlport", required_argument, 0, 'c' },
-			{ "dataorb", required_argument, 0, 'o' },
-			{ "pf", required_argument, 0, 'g' },
-			{ "statefile", required_argument, 0, 's' },
-			{ "testfile", required_argument, 0, 's' },
-			{ 0, 0, 0, 0 } };
+	/* These options set a flag */
+	{ "verbose", no_argument, &oConfig.bVerboseModeFlag, TRUE}, { "brief",
+		no_argument, &oConfig.bVerboseModeFlag, FALSE}, { "validatepf",
+	no_argument, &oConfig.bPFValidateFlag, TRUE},
+/* These options don't set a flag. We distinguish them by their indices. */
+{ "usage", no_argument, 0, 'V' }, { "dcaddress", required_argument, 0, 'a' }, {
+"dataport", required_argument, 0, 'd' }, { "controlport", required_argument, 0,
+'c' }, { "dataorb", required_argument, 0, 'o' }, { "pf", required_argument, 0,
+'g' }, { "statefile", required_argument, 0, 's' }, { "testfile",
+required_argument, 0, 's' }, { 0, 0, 0, 0 } };
 
 	/* Initialize the CONFIG structure */
 	oConfig.bVerboseModeFlag = FALSE;
@@ -1203,6 +1199,11 @@ int parseBBAPacket(unsigned char *aBBAPkt, struct stBBAPacketInfo* oPktInfo) {
 		elog_log(0, "parseBBAPacket(): Can't recognize a data type %d(%02x)\n",
 				aBBAPkt[BBA_DTYPE_OFF], aBBAPkt[BBA_DTYPE_OFF]);
 		return RESULT_FAILURE;
+	}
+	if (oConfig.bVerboseModeFlag == TRUE) {
+		elog_debug(0, "parseBBAPacket(): BBA datatype %d(%02x) evalutes to %s",
+				aBBAPkt[BBA_DTYPE_OFF], aBBAPkt[BBA_DTYPE_OFF],
+				oPktInfo->sDataType);
 	}
 
 	/* Get packet time */
