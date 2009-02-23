@@ -66,7 +66,7 @@
  * Globals
  */
 Bns *oDCDataBNS = NULL;
-int orbfd = -1;
+int iDataOrbFD = -1;
 struct stConfigData oConfig;
 
 /*
@@ -137,7 +137,7 @@ int main(int iArgCount, char *aArgList[]) {
 		signal(SIGUSR1, sig_hdlr);
 
 		/* Connect to the ORB */
-		if ((orbfd = orbopen(oConfig.sOrbName, "w&")) < 0) {
+		if ((iDataOrbFD = orbopen(oConfig.sOrbName, "w&")) < 0) {
 			elog_complain(1, "orbopen: unable to connect to ORB \"%s\".",
 					oConfig.sOrbName);
 			dcbbaCleanup(-1);
@@ -188,7 +188,7 @@ int main(int iArgCount, char *aArgList[]) {
 									sOutPkt, iOutPktLen, stderr, PKT_DUMP);
 						}
 
-						if (orbput(orbfd, oPktInfo.sSrcname, oPktInfo.dPktTime,
+						if (orbput(iDataOrbFD, oPktInfo.sSrcname, oPktInfo.dPktTime,
 								sOutPkt, iOutPktLen)) {
 							elog_complain(0, "orbput() failed in main()\n");
 							dcbbaCleanup(-1);
@@ -692,8 +692,8 @@ void dcbbaCleanup(int iExitCode) {
 		bnsclose(oDCDataBNS);
 
 	/* Close the orb connection */
-	if (orbfd)
-		orbclose(orbfd);
+	if (iDataOrbFD)
+		orbclose(iDataOrbFD);
 	/* Exit */
 	exit(iExitCode);
 }
