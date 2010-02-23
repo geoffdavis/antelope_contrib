@@ -106,6 +106,7 @@ make &Arr{
 	^r -
 	^ar: creating
 	^ar: writing
+	^amakelocal:
 	^[[:alnum:]_]+\\.[fF]:$
 	^[[:space:]]*MAIN:$
 	^[[:space:]]+MAIN [[:alnum:]_]+:$
@@ -117,6 +118,7 @@ make &Arr{
 	^make\\[[[:digit:]]+\\]:.*is up to date
 	^NOTICE:
 	^Current working directory
+	^Optimizing from Makefile
 	^Instrumenting:
 	^Purify engine:
 	^Purify.*Copyright
@@ -135,6 +137,7 @@ make &Arr{
 	^name=
 	^input=
 	^output=
+	^uninstalling
    }
    blue &Tbl{
 	^ar[[:space:]]
@@ -149,8 +152,8 @@ make &Arr{
 	^gfortran[[:space:]]
 	^gcc[[:space:]]
 	^g\\+\\+[[:space:]]
-	^-> gcc[[:space:]]
-	^cd[[:space:]]
+	^-> gcc([-.0-9]*)?[[:space:]]
+	^[( ]*cd[[:space:]]
 	^chmod[[:space:]]
 	^compile[[:space:]]
 	^purify[[:space:]]
@@ -182,7 +185,8 @@ make &Arr{
 	^[[:space:]]*config\\/install-sh[[:space:]]
 	^make[[:space:]]
 	^mkdir[[:space:]]
-	^mex[[:space:]]
+	^[[:space:]]*[[:alnum:]._\\/]*mex[[:space:]]
+	^[[:space:]]*[[:alnum:]._\\/]*matlab[[:space:]]
 	^mv[[:space:]]
 	^perl[[:space:]]
 	^\\/opt\\/antelope\\/[[:digit:].p]+\\/bin\\/perl[[:space:]]
@@ -222,6 +226,58 @@ cvs &Arr{
    cyan &Tbl{		# Standard operations and results
 	cvs update: Updating
 	^U[[:space:]]
+   }
+}
+
+ia2orb &Arr{
+   red &Tbl{
+	.*Failed to list contents
+	.*Shutting down
+	.*Connection closed by remote host
+	.*Permission denied
+	.*Connection refused
+	.*MSD not found
+	.*ia2orb.*fatal
+   }
+   green &Tbl{
+   	.*Program started
+   	.*Program terminated
+   }
+   blue &Tbl{
+   	.*Executing
+	.*Command
+   	.*Acquiring
+	.*Launching thread
+	.*Retrieving state information
+	.*Opened.*orb
+	.*Configuring acquisition threads
+   }
+   magenta &Tbl{
+   	.*harmless--continuing
+	.*Attempted but failed to resurrect
+	.*Failed to reposition
+	.*Ignoring data request because
+	.*No such file or directory
+	.*Failed to acquire
+   }
+   cyan &Tbl{
+	.*command returned empty string
+	^[[:digit:]]+.[[:digit:]]+.MSD
+	.*stations in the ia_network
+	.*Resurrected
+	.*Watching
+	.*orbseek to
+	.*orbafter returns packet
+	.*Initiated state tracking
+	.*Sleeping.*seconds
+	.*miniseed2orb.*notify
+	.*from.*files in
+	.*blocks.second
+	.*Mbyte.sec
+	.*Re-configuring acquisition threads
+	.*Cancelling acquisition thread
+	.*successfully cancelled
+	.*Continuing.*in response to resurrection request
    }
 }
 

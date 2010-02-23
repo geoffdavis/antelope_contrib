@@ -14,12 +14,15 @@ dbname              = ''
 port                = -1
 binning_threshold   = -1
 canvas_size_default = -1
+apply_calib         = False
 display_tracebacks  = False
 verbose             = False
 daemonize           = False
 import_paths        = ()
 jquery_files        = ()
 default_chans       = ()
+default_time_window = -1
+filters             = {}
 
 def usage():
 
@@ -59,9 +62,12 @@ def configure(args):
     globals()['index_html_template']  = stock.pfget_string( pfname, "index_html_template" )
     globals()['application_name']     = stock.pfget_string( pfname, "application_name" )
     globals()['application_title']    = stock.pfget_string( pfname, "application_title" )
+    globals()['apply_calib']          = stock.pfget_boolean( pfname, "apply_calib" )
     globals()['display_tracebacks']   = stock.pfget_boolean( pfname, "display_tracebacks" )
     globals()['jquery_files']         = stock.pfget_tbl( pfname, "jquery_files" )
     globals()['default_chans']        = stock.pfget_tbl( pfname, "default_chans" )
+    globals()['default_time_window']  = stock.pfget_tbl( pfname, "default_time_window" )
+    globals()['filters']              = stock.pfget_arr( pfname, "filters" )
 
     for option, value in opts:
 

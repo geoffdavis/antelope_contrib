@@ -16,7 +16,9 @@ DATA= 	qx80-90.pf \
     q330hr_linear_below_20.pf \
     q330hr_linear_below_40.pf \
     q4120.pf \
-    q730.pf 
+    q730.pf \
+    qep_ANF.pf \
+    qep_soh_only.pf 
 
 include $(ANTELOPEMAKE)
 DIRS=

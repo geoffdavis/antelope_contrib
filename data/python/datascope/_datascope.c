@@ -44,6 +44,7 @@
 
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 #include "Python.h"
 #include "db.h"
 #include "dbxml.h"
@@ -655,14 +656,14 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 	if( obj == Py_None ) {
 
-		*atbl = 0;
+		*atbl = NULL;
 
 		return 1;
 	} 
 
 	if( PyString_Check( obj ) ) {
 
-		*atbl = strtbl( PyString_AsString( obj ), NULL );
+		*atbl = strtbl( strdup( PyString_AsString( obj ) ),  NULL );
 
 		return 1;
 	}
@@ -671,6 +672,8 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 		PyErr_SetString( PyExc_TypeError, 
 			"Attempt to convert sequence to table of strings failed: input argument is not a sequence" );
+
+		*atbl = NULL;
 
 		return 0;
 	}
@@ -685,9 +688,9 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 		if( ! seqobj ) {
 
-			freetbl( *atbl, 0 );
+			freetbl( *atbl, free );
 
-			*atbl = 0;
+			*atbl = NULL;
 
 			sprintf( errmsg, 
 				"Attempt to convert sequence to table of strings failed: "
@@ -700,9 +703,9 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 		if( ! PyString_Check( seqobj ) ) {
 
-			freetbl( *atbl, 0 );
+			freetbl( *atbl, free );
 
-			*atbl = 0;
+			*atbl = NULL;
 
 			sprintf( errmsg, 
 				"Attempt to convert sequence to table of strings failed: "
@@ -715,9 +718,9 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 		if( ( astring = PyString_AsString( seqobj ) ) == NULL ) {
 
-			freetbl( *atbl, 0 );
+			freetbl( *atbl, free );
 
-			*atbl = 0;
+			*atbl = NULL;
 
 			sprintf( errmsg, 
 				"Attempt to convert sequence to table of strings failed: "
@@ -728,7 +731,7 @@ parse_to_strtbl( PyObject *obj, void *addr )
 			return 0;
 		}
 
-		pushtbl( *atbl, astring );
+		pushtbl( *atbl, strdup( astring ) );
 	}
 
 	return 1;
@@ -1286,12 +1289,12 @@ python_dbmatches( PyObject *self, PyObject *args ) {
 
 	if( kpattern != NULL ) {
 
-		freetbl( kpattern, 0 );
+		freetbl( kpattern, free );
 	} 
 
 	if( ( tpattern != NULL ) && ! duplicate_pattern ) {
 
-		freetbl( tpattern, 0 );
+		freetbl( tpattern, free );
 	} 
 
 	if( rc < 0 ) {
@@ -1330,6 +1333,8 @@ python_dbprocess( PyObject *self, PyObject *args ) {
 	}
 
 	db = dbprocess( db, list, 0 );
+
+	freetbl( list, free );
 
 	return Dbptr2PyObject( db );
 }
@@ -1390,7 +1395,7 @@ python_dbsort( PyObject *self, PyObject *args ) {
 
 	if( keys != NULL ) {
 
-		freetbl( keys, 0 );
+		freetbl( keys, free );
 	}
 
 	return Dbptr2PyObject( db );
@@ -1404,6 +1409,8 @@ python_dbjoin( PyObject *self, PyObject *args ) {
 	Dbptr	dbout;
 	Tbl	*pattern1 = 0;
 	Tbl 	*pattern2 = 0;
+	int	pattern1_specified = 0;
+	int	pattern2_specified = 0;
 	int	outer = 0;
 	int	duplicate_pattern = 0;
 	char	*name = 0;
@@ -1423,7 +1430,17 @@ python_dbjoin( PyObject *self, PyObject *args ) {
 		return NULL;
 	}
 
-	if( pattern1 != 0 && pattern2 == 0 ) {
+	if( pattern1 != NULL ) {
+
+		pattern1_specified++;
+	}
+
+	if( pattern2 != NULL ) {
+
+		pattern2_specified++;
+	}
+
+	if( pattern1 != NULL && pattern2 == NULL ) {
 
 		pattern2 = pattern1; 
 
@@ -1434,13 +1451,28 @@ python_dbjoin( PyObject *self, PyObject *args ) {
 
 	if( pattern1 != NULL ) {
 
-		freetbl( pattern1, 0 );
+		if( pattern1_specified ) {
+
+			freetbl( pattern1, free );
+
+		} else {
+
+			freetbl( pattern1, 0 );
+		}
 	}
 
 	if( pattern2 != NULL && ! duplicate_pattern ) {
 
-		freetbl( pattern2, 0 );
+		if( pattern2_specified ) {
+
+			freetbl( pattern2, free );
+
+		} else {
+
+			freetbl( pattern2, 0 );
+		}
 	}
+
 
 	return Dbptr2PyObject( dbout );
 }
@@ -1451,9 +1483,11 @@ python_dbnojoin( PyObject *self, PyObject *args ) {
 	Dbptr	db1;
 	Dbptr	db2;
 	Dbptr	dbout;
-	Tbl	*pattern1 = 0;
-	Tbl 	*pattern2 = 0;
+	Tbl	*pattern1 = NULL;
+	Tbl 	*pattern2 = NULL;
 	int	duplicate_pattern = 0;
+	int	pattern1_specified = 0;
+	int	pattern2_specified = 0;
 	char	*name = 0;
 
 	if( ! PyArg_ParseTuple( args, "O&O&O&O&z", parse_to_Dbptr, &db1, 
@@ -1470,7 +1504,17 @@ python_dbnojoin( PyObject *self, PyObject *args ) {
 		return NULL;
 	}
 
-	if( pattern1 != 0 && pattern2 == 0 ) {
+	if( pattern1 != NULL ) {
+
+		pattern1_specified++;
+	}
+
+	if( pattern2 != NULL ) {
+
+		pattern2_specified++;
+	}
+
+	if( pattern1 != NULL && pattern2 == NULL ) {
 
 		pattern2 = pattern1; 
 
@@ -1481,12 +1525,26 @@ python_dbnojoin( PyObject *self, PyObject *args ) {
 
 	if( pattern1 != NULL ) {
 
-		freetbl( pattern1, 0 );
+		if( pattern1_specified ) {
+
+			freetbl( pattern1, free );
+
+		} else {
+
+			freetbl( pattern1, 0 );
+		}
 	}
 
 	if( pattern2 != NULL && ! duplicate_pattern ) {
 
-		freetbl( pattern2, 0 );
+		if( pattern2_specified ) {
+
+			freetbl( pattern2, free );
+
+		} else {
+
+			freetbl( pattern2, 0 );
+		}
 	}
 
 	return Dbptr2PyObject( dbout );
@@ -1578,7 +1636,7 @@ python_dbgroup( PyObject *self, PyObject *args ) {
 
 	if( groupfields != NULL ) {
 
-		freetbl( groupfields, 0 );
+		freetbl( groupfields, free );
 	}
 
 	return Dbptr2PyObject( db );
@@ -1654,12 +1712,12 @@ python_db2xml( PyObject *self, PyObject *args ) {
 
 	if( fields ) {
 
-		freetbl( fields, 0 );
+		freetbl( fields, free );
 	}
 
 	if( expressions ) {
 
-		freetbl( expressions, 0 );
+		freetbl( expressions, free );
 	}
 
 	if( rc < 0 || xml == NULL) {
@@ -2417,7 +2475,7 @@ python_trfilter( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_trsample( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _trsample(db, t0, t1, sta, chan, apply_calib)";
+	char	*usage = "Usage: _trsample(db, t0, t1, sta, chan, apply_calib, filter)";
 	Dbptr	db;
 	Dbptr	tr;
 	double	t0;
@@ -2428,6 +2486,7 @@ python_trsample( PyObject *self, PyObject *args ) {
 	float	*data;
 	char	*sta;
 	char	*chan;
+	char	*filter = 0;
 	int	apply_calib = 0;
 	int	nrows = 0;
 	int	nsamp_total = 0;
@@ -2435,11 +2494,14 @@ python_trsample( PyObject *self, PyObject *args ) {
 	int	irow;
 	int	isamp_row = 0;
 	int	isamp_total = 0;
+	int	rc;
 	PyObject *obj;
 	PyObject *pair;
 
-	if( ! PyArg_ParseTuple( args, "O&ddssO&", parse_to_Dbptr, 
-				       &db, &t0, &t1, &sta, &chan, parse_from_Boolean, &apply_calib ) ) {
+	if( ! PyArg_ParseTuple( args, "O&ddssO&z", parse_to_Dbptr, 
+				       &db, &t0, &t1, &sta, &chan, 
+				       parse_from_Boolean, &apply_calib, 
+				       &filter) ) {
 
 		if( ! PyErr_Occurred() ) {
 
@@ -2459,6 +2521,26 @@ python_trsample( PyObject *self, PyObject *args ) {
 			"trsample: no data (no rows in trace object)\n" );
 
 		return NULL;
+	}
+
+	if( filter != (char *) NULL ) {
+		
+		rc = trfilter( tr, filter );
+
+		if( rc == -2 ) {
+
+			PyErr_SetString( PyExc_RuntimeError, 
+				"trsample: error parsing filter string\n" );
+
+			return NULL;
+
+		} else if( rc < 0 ) {
+
+			PyErr_SetString( PyExc_RuntimeError, 
+				"trsample: unknown error while attempting to filter data\n" );
+
+			return NULL;
+		}
 	}
 
 	if( apply_calib ) {
@@ -2524,7 +2606,7 @@ python_trsample( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_trsamplebins( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _trsamplebins(db, t0, t1, sta, chan, binsize, apply_calib)";
+	char	*usage = "Usage: _trsamplebins(db, t0, t1, sta, chan, binsize, apply_calib, filter)";
 	Dbptr	db;
 	Dbptr	tr;
 	double	t0;
@@ -2537,6 +2619,7 @@ python_trsamplebins( PyObject *self, PyObject *args ) {
 	double	max;
 	char	*sta;
 	char	*chan;
+	char	*filter = 0;
 	int	apply_calib = 0;
 	int	binsize = 1;
 	int	nrows = 0;
@@ -2546,11 +2629,14 @@ python_trsamplebins( PyObject *self, PyObject *args ) {
 	int	irow;
 	int	isamp_row = 0;
 	int	ireturn = 0;
+	int	rc;
 	PyObject *obj;
 	PyObject *triple;
 
-	if( ! PyArg_ParseTuple( args, "O&ddssiO&", parse_to_Dbptr, 
-				       &db, &t0, &t1, &sta, &chan, &binsize, parse_from_Boolean, &apply_calib ) ) {
+	if( ! PyArg_ParseTuple( args, "O&ddssiO&z", parse_to_Dbptr, 
+				       &db, &t0, &t1, &sta, &chan, 
+				       &binsize, parse_from_Boolean, &apply_calib,
+				       &filter ) ) {
 
 		if( ! PyErr_Occurred() ) {
 
@@ -2570,6 +2656,26 @@ python_trsamplebins( PyObject *self, PyObject *args ) {
 			"trsamplebins: no data (no rows in trace object)\n" );
 
 		return NULL;
+	}
+
+	if( filter != (char *) NULL ) {
+		
+		rc = trfilter( tr, filter );
+
+		if( rc == -2 ) {
+
+			PyErr_SetString( PyExc_RuntimeError, 
+				"trsample: error parsing filter string\n" );
+
+			return NULL;
+
+		} else if( rc < 0 ) {
+
+			PyErr_SetString( PyExc_RuntimeError, 
+				"trsample: unknown error while attempting to filter data\n" );
+
+			return NULL;
+		}
 	}
 
 	if( apply_calib ) {
@@ -2751,6 +2857,7 @@ python_trdatabins( PyObject *self, PyObject *args ) {
 	int	binsize = 1;
 	int	result;
 	int	nsamp;
+	int	nbins;
 	int	i;
 	int	ipair = 0;
 	double	min;
@@ -2786,7 +2893,14 @@ python_trdatabins( PyObject *self, PyObject *args ) {
 		return NULL;
 	}
 
-	obj = PyTuple_New( nsamp );
+	nbins = (int) floor( (double) nsamp / (double) binsize );
+
+	if( nsamp % binsize != 0 ) {
+
+		nbins += 1;
+	}
+
+	obj = PyTuple_New( nbins );
 
 	for( i = 0; i < nsamp; i++ ) {
 

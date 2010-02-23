@@ -1,7 +1,12 @@
 .optimize.db
+.optimize.pag
+.optimize.dir
 .DS_Store
 .make.state
 *.a
 *.o
-*.dylib
 *.so
+*.so.[0-9]
+*.dSYM
+*.dylib
+*.swp
