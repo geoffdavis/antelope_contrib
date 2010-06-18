@@ -9,7 +9,18 @@ from antelope.stock import *
 .fi
 .SH DESCRIPTION
 The Python Interface to the Antelope stock library allows one to perform operations 
-from libstock.so in the Python scripting language. 
+from the Antelope libstock.so shared-object library in the Python scripting language. 
+
+Upon encountering problems, these routines will raise exceptions
+from the \fIElogException\fP class of Python Exceptions defined in
+this module. This class of exceptions has the several subclasses
+\fIElogLog\fP, \fIElogNotify\fP, \fIElogComplain\fP, and \fIElogDie\fP.
+\fIElogException\fP objects define the two attributes e.\fIseverity\fP
+and e.\fIstring\fP, where e.\fIstring\fP is a string message
+associated with the exception and e.\fIseverity\fP is an integer
+severity indicator which will be one of ELOG_LOG, ELOG_NOTIFY,
+ELOG_COMPLAIN, ELOG_DIE, ELOG_FAULT, ELOG_ALERT, or ELOG_DEBUGGING.
+
 Following are brief descriptions of the functions implemented.
 
 .SS Datascope functions
@@ -131,6 +142,32 @@ val = pfget( pfname, pfkey )
 .in
 .ft R
 
+.IP "\fBpfout\fP (pfname, file)"
+Write a file to the specified file object
+.ft CW
+.in 2c
+.nf
+.ne 3
+
+pfout( pfname, file )
+
+.fi
+.in
+.ft R
+
+.IP "\fBpfwrite\fP (pfname, filename)"
+Write a file to the named file 
+.ft CW
+.in 2c
+.nf
+.ne 3
+
+pfwrite( pfname, filename )
+
+.fi
+.in
+.ft R
+
 .IP "\fBpf2xml\fP (pfname, flags = 0, prolog = None, name = None)"
 Convert a parameter-file to XML
 .ft CW
@@ -233,8 +270,21 @@ elog_init(sys.argv)
 .in
 .ft R
 
+.IP "\fBelog_log\fP (msg)"
+Put a log message on the Antelope error log, raising an ElogLog exception
+.ft CW
+.in 2c
+.nf
+.ne 3
+
+elog_log("Test log message")
+
+.fi
+.in
+.ft R
+
 .IP "\fBelog_notify\fP (msg)"
-Put a notification message on the Antelope error log
+Put a notification message on the Antelope error log, raising an ElogNotify exception
 .ft CW
 .in 2c
 .nf
@@ -247,7 +297,7 @@ elog_notify("Test notification message")
 .ft R
 
 .IP "\fBelog_complain\fP (msg)"
-Put a complaint message on the Antelope error log
+Put a complaint message on the Antelope error log, raising an ElogComplaint exception
 .ft CW
 .in 2c
 .nf
@@ -260,7 +310,7 @@ elog_complain("Test complaint message")
 .ft R
 
 .IP "\fBelog_die\fP (msg)"
-Put a fatal message on the Antelope error log and exit
+Put a fatal message on the Antelope error log, raise an ElogDie exception, and exit
 .ft CW
 .in 2c
 .nf

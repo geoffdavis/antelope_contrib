@@ -8,7 +8,7 @@ fflags=
 ldflags=
 ldlibs=
 
-include $(ANTELOPE)/include/mex_antelope_makerules
+include $(ANTELOPE)/local/include/mex_antelope_makerules
 
 OBJS= 	  variables2mxArray.o \
 	  dbptr_struct.o \
@@ -30,6 +30,7 @@ OBJS= 	  variables2mxArray.o \
 	  pfpeek.o \
 	  get_variables.o \
 	  antelope_mex_clear_register.o \
+	  antelope_mex_elog_callback.o \
 	  dbfield2mxArray.o \
 	  dbcolumn2mxArray.o \
 	  mxArray2dbvalue.o \

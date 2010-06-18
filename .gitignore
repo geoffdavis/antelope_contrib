@@ -1,6 +1,7 @@
 .optimize.db
 .optimize.pag
 .optimize.dir
+.optimize
 .DS_Store
 .make.state
 *.a
@@ -10,3 +11,6 @@
 *.dSYM
 *.dylib
 *.swp
+.%certify.*
+certify.history
+certify.log

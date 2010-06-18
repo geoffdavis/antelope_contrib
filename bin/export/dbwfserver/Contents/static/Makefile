@@ -1,9 +1,10 @@
 DATADIR = www/dbwfserver/static/
 
-DATA = jquery-ui-1.7.2.custom.css \
-    dbwfserver.css \
-    dbwfserver.js
+ANTELOPEMAKELOCAL = $(ANTELOPE)/local/include/antelopemake.local
 
 include $(ANTELOPEMAKE)
+include $(ANTELOPEMAKELOCAL)
 
-DIRS = images
+SUBDIR= /local
+
+DIRS = images jquery css

@@ -1,9 +1,0 @@
-DATADIR= php/library
-
-DATA=  stanote.inc \
-       colorstr2rgb.inc
-
-MAN3H= stanote.3h \
-       colorstr2rgb.3h
-
-include $(ANTELOPEMAKE)

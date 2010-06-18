@@ -1,0 +1,13 @@
+
+ANTELOPEMAKELOCAL = $(ANTELOPE)/local/include/antelopemake.local
+
+include $(ANTELOPEMAKE)
+include $(ANTELOPEMAKELOCAL)
+
+SUBDIR= /local
+
+install :: install_php_link
+
+install_php_link: $(PHP_EXECUTABLE)
+	$(RM) $(DEST)/bin/php
+	ln -s $(PHP_EXECUTABLE) $(DEST)/bin/php

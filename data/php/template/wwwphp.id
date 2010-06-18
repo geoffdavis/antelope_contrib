@@ -1,0 +1,10 @@
+<?php
+	putenv( "ANTELOPE=/opt/antelope/$id" );
+	$_ENV{'ANTELOPE'} = "/opt/antelope/$id";
+
+	set_include_path( get_include_path() .
+			  PATH_SEPARATOR . 
+			  $_ENV{'ANTELOPE'} . "/local/data/www" .
+			  PATH_SEPARATOR . 
+			  $_ENV{'ANTELOPE'} . "/local/data/php" );
+?>

@@ -1,5 +1,5 @@
 /*
- *   Copyright (c) 2007-2008 Lindquist Consulting, Inc.
+ *   Copyright (c) 2007-2010 Lindquist Consulting, Inc.
  *   All rights reserved. 
  *                                                                     
  *   Written by Dr. Kent Lindquist, Lindquist Consulting, Inc. 
@@ -47,6 +47,9 @@
 #include "Python.h"
 #include "stock.h"
 #include "pfxml.h"
+#include "elog.h"
+
+#define USAGE raise_elog( ELOG_COMPLAIN, usage )
 
 #ifdef __APPLE__
 
@@ -67,7 +70,10 @@ extern void proc2pidstat( void *kinfo, void *process );
 char	**_stock_argv = NULL;
 int	_stock_argc = 0;
 
+static PyObject *_stock_ElogException;
+
 static PyObject *python_elog_init( PyObject *self, PyObject *args );
+static PyObject *python_elog_log( PyObject *self, PyObject *args );
 static PyObject *python_elog_notify( PyObject *self, PyObject *args );
 static PyObject *python_elog_complain( PyObject *self, PyObject *args );
 static PyObject *python_elog_die( PyObject *self, PyObject *args );
@@ -82,6 +88,8 @@ static PyObject *python_pfget_tbl( PyObject *self, PyObject *args );
 static PyObject *python_pfget( PyObject *self, PyObject *args );
 static PyObject *python_pfupdate( PyObject *self, PyObject *args );
 static PyObject *python_pffiles( PyObject *self, PyObject *args );
+static PyObject *python_pfout( PyObject *self, PyObject *args );
+static PyObject *python_pfwrite( PyObject *self, PyObject *args );
 static PyObject *python_pf2string( PyObject *self, PyObject *args );
 static PyObject *python_pf2xml( PyObject *self, PyObject *args );
 static PyObject *python_strtime( PyObject *self, PyObject *args );
@@ -102,10 +110,15 @@ static PyObject *string2PyObject( char *s );
 static PyObject *strtbl2PyObject( Tbl *atbl );
 static int parse_from_Boolean( PyObject *obj, void *addr );
 static int parse_to_strtbl( PyObject *obj, void *addr );
+static int python_elog_callback( int severity, char *string, Tbl *Elog );
+static void raise_elog( int severity, char *string );
+static void add_stock_constants( PyObject *mod );
+static void add_elog_exception( PyObject *mod );
 PyMODINIT_FUNC init_stock( void );
 
 static struct PyMethodDef stock_methods[] = {
 	{ "_elog_init",   	python_elog_init,   	METH_VARARGS, "Initialize the Antelope error log" },
+	{ "_elog_log",   	python_elog_log,   	METH_VARARGS, "Put a log message on the Antelope error log" },
 	{ "_elog_notify",   	python_elog_notify,   	METH_VARARGS, "Put a notification message on the Antelope error log" },
 	{ "_elog_complain",   	python_elog_complain,  	METH_VARARGS, "Put a warning message on the Antelope error log" },
 	{ "_elog_die",   	python_elog_die,   	METH_VARARGS, "Put a fatal message on the Antelope error log and exit" },
@@ -120,13 +133,15 @@ static struct PyMethodDef stock_methods[] = {
 	{ "_pfget",   		python_pfget,   	METH_VARARGS, "Get a value from a parameter file" },
 	{ "_pfupdate", 		python_pfupdate,   	METH_VARARGS, "Reread and update a parameter file" },
 	{ "_pffiles", 		python_pffiles,   	METH_VARARGS, "Return a list of parameter path names" },
+	{ "_pfout", 		python_pfout,   	METH_VARARGS, "Write a parameter file to a file object" },
+	{ "_pfwrite", 		python_pfwrite,   	METH_VARARGS, "Write a parameter file to the named file" },
 	{ "_pf2string",		python_pf2string,   	METH_VARARGS, "Convert a parameter-file to a string" },
 	{ "_pf2xml",		python_pf2xml,   	METH_VARARGS, "Convert a parameter-file to an xml string" },
 	{ "_strtdelta",   	python_strtdelta,   	METH_VARARGS, "Convert a time-difference to a string" },
 	{ "_strydtime",   	python_strydtime,   	METH_VARARGS, "Convert an epoch time to a string date and time including julian day" },
 	{ "_strdate",   	python_strdate,   	METH_VARARGS, "Convert an epoch time to a string date" },
 	{ "_strlocaltime",   	python_strlocaltime,   	METH_VARARGS, "Convert an epoch time to a local date and time string" },
-	{ "_strlocalydtime",   	python_strlocalydtime,   	METH_VARARGS, "Convert an epoch time to a local date and time string with julian day" },
+	{ "_strlocalydtime",   	python_strlocalydtime,  METH_VARARGS, "Convert an epoch time to a local date and time string with julian day" },
 	{ "_strlocaldate",   	python_strlocaldate,   	METH_VARARGS, "Convert an epoch time to a string date in local time zone" },
 	{ "_strtime",   	python_strtime,   	METH_VARARGS, "Compute a string representation of epoch time" },
 	{ "_str2epoch",   	python_str2epoch,   	METH_VARARGS, "Compute an epoch time from a string" },
@@ -147,6 +162,25 @@ proc2pidstat ( void *kinfo, void *process) {
 
 #endif
 
+static void
+raise_elog( int severity, char *string )
+{
+	PyObject_SetAttrString( _stock_ElogException, "severity", PyInt_FromLong( (long) severity ) ); 
+	PyObject_SetAttrString( _stock_ElogException, "string", PyString_FromString( string ) ); 
+
+	PyErr_SetObject( _stock_ElogException, _stock_ElogException ); 
+
+	return;
+}
+
+static int
+python_elog_callback( int severity, char *string, Tbl *Elog )
+{
+	raise_elog( severity, string );
+
+	return 1;
+}
+
 static int
 parse_from_Boolean( PyObject *obj, void *addr )
 {
@@ -166,8 +200,7 @@ parse_from_Boolean( PyObject *obj, void *addr )
 
 	} else {
 
-		PyErr_SetString( PyExc_TypeError, 
-			"Attempt to coerce non-Boolean value into Boolean" );
+		PyErr_WarnEx( NULL, "Attempt to coerce non-Boolean value into Boolean", 1 );
 	}
 
 	return 0;
@@ -178,8 +211,8 @@ parse_to_strtbl( PyObject *obj, void *addr )
 {
 	Tbl	**atbl = (Tbl **) addr;
 	PyObject *seqobj;
-	int	nitems = 0;
-	int	iitem;
+	long	nitems = 0;
+	long	iitem;
 	char	*astring;
 	char	errmsg[STRSZ];
 
@@ -199,8 +232,8 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 	if( ! PySequence_Check( obj ) ) {
 
-		PyErr_SetString( PyExc_TypeError, 
-			"Attempt to convert sequence to table of strings failed: input argument is not a sequence" );
+		PyErr_WarnEx( NULL, 
+		"Attempt to convert sequence to table of strings failed: input argument is not a sequence", 1 );
 
 		*atbl = NULL;
 
@@ -223,9 +256,9 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 			sprintf( errmsg, 
 				"Attempt to convert sequence to table of strings failed: "
-				"failed to extract item %d (counting from 0)", iitem );
+				"failed to extract item %ld (counting from 0)", iitem );
 
-			PyErr_SetString( PyExc_TypeError, errmsg );
+			PyErr_WarnEx( NULL, errmsg, 1 );
 
 			return 0;
 		}
@@ -238,9 +271,9 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 			sprintf( errmsg, 
 				"Attempt to convert sequence to table of strings failed: "
-				"item %d (counting from 0) is not a string", iitem );
+				"item %ld (counting from 0) is not a string", iitem );
 
-			PyErr_SetString( PyExc_TypeError, errmsg );
+			PyErr_WarnEx( NULL, errmsg, 1 );
 
 			return 0;
 		}
@@ -253,9 +286,9 @@ parse_to_strtbl( PyObject *obj, void *addr )
 
 			sprintf( errmsg, 
 				"Attempt to convert sequence to table of strings failed: "
-				"conversion of item %d (counting from 0) to string failed", iitem );
+				"conversion of item %ld (counting from 0) to string failed", iitem );
 
-			PyErr_SetString( PyExc_TypeError, errmsg );
+			PyErr_WarnEx( NULL, errmsg, 1 );
 
 			return 0;
 		}
@@ -295,7 +328,7 @@ string2PyObject( char *s )
 
 	if( strmatches( s, "^[-+]{0,1}[[:digit:]]{1,}$", 0 ) == 1 ) {
 
-		obj = Py_BuildValue( "i", atoi( s ) );
+		obj = Py_BuildValue( "i", atol( s ) );
 
 	} else if( ( tf = yesno( s ) ) <= 0 ) {
 
@@ -392,14 +425,14 @@ pf2PyObject( Pf *pf )
 
 static PyObject *
 python_elog_init( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _elog_init( sys.argv )\n";
+	char	*usage = "Usage: _stock._elog_init( sys.argv )\n";
 	Tbl	*arglist;
 	int	iarg;
 	int	rc;
 
 	if( ! PyArg_ParseTuple( args, "O&", parse_to_strtbl, &arglist ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -414,7 +447,7 @@ python_elog_init( PyObject *self, PyObject *args ) {
 		free( _stock_argv );
 	}
 
-	_stock_argc = maxtbl( arglist );
+	_stock_argc = (int) maxtbl( arglist );
 
 	allot( char **, _stock_argv, _stock_argc );
 
@@ -431,64 +464,84 @@ python_elog_init( PyObject *self, PyObject *args ) {
 }
 
 static PyObject *
-python_elog_notify( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _elog_notify( msg )\n";
+python_elog_log( PyObject *self, PyObject *args ) {
+	char	*usage = "Usage: _stock._elog_log( msg )\n";
 	char	*msg;
 
 	if( ! PyArg_ParseTuple( args, "s", &msg ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
+
+		return NULL;
+	}
+
+	elog_log( 0, "%s", msg );
+
+	return NULL;
+}
+
+static PyObject *
+python_elog_notify( PyObject *self, PyObject *args ) {
+	char	*usage = "Usage: _stock._elog_notify( msg )\n";
+	char	*msg;
+
+	if( ! PyArg_ParseTuple( args, "s", &msg ) ) {
+
+		USAGE;
 
 		return NULL;
 	}
 
 	elog_notify( 0, "%s", msg );
 
-	return Py_BuildValue( "" );
+	return NULL;
 }
 
 static PyObject *
 python_elog_complain( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _elog_complain( msg )\n";
+	char	*usage = "Usage: _stock._elog_complain( msg )\n";
 	char	*msg;
 
 	if( ! PyArg_ParseTuple( args, "s", &msg ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
 
 	elog_complain( 0, msg );
 
-	return Py_BuildValue( "" );
+	return NULL;
 }
 
 static PyObject *
 python_elog_die( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _elog_die( msg )\n";
+	char	*usage = "Usage: _stock._elog_die( msg )\n";
 	char	*msg;
 
 	if( ! PyArg_ParseTuple( args, "s", &msg ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
 
-	PyErr_SetString( PyExc_SystemExit, msg );
+	/* Circumvent forced exit(1) embedded in elog_die() to implement SystemError
+	   exception in stock.py script layer */
+
+	python_elog_callback( ELOG_DIE, msg, (Tbl *) NULL );
 
 	return NULL;
 }
 
 static PyObject *
 python_pfupdate( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfupdate( pfname )\n";
+	char	*usage = "Usage: _stock._pfupdate( pfname )\n";
 	char	*pfname;
 
 	if( ! PyArg_ParseTuple( args, "s", &pfname ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -498,7 +551,7 @@ python_pfupdate( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pffiles( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pffiles( pfname, all )\n";
+	char	*usage = "Usage: _stock._pffiles( pfname, all )\n";
 	char	*pfname;
 	int	all = 0;
 	Tbl	*filestbl;
@@ -508,7 +561,7 @@ python_pffiles( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "sO&", &pfname, parse_from_Boolean, &all ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -517,7 +570,7 @@ python_pffiles( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -532,17 +585,18 @@ python_pffiles( PyObject *self, PyObject *args ) {
 }
 
 static PyObject *
-python_pf2string( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pf2string( pfname )\n";
+python_pfout( PyObject *self, PyObject *args ) {
+	char	*usage = "Usage: _stock._pfout( pfname, file )\n";
 	char	*pfname;
 	Pf	*pf;
-	char	*value;
-	PyObject *obj;
+	FILE	*fp;
+	PyObject *fileobj;
 	char	errmsg[STRSZ];
+	long	rc;
 
-	if( ! PyArg_ParseTuple( args, "s", &pfname ) ) {
+	if( ! PyArg_ParseTuple( args, "sO!", &pfname, &PyFile_Type, &fileobj ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -551,7 +605,69 @@ python_pf2string( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
+
+		return NULL;
+	}
+
+	fp = PyFile_AsFile( fileobj );
+
+	rc = pfout( fp, pf );
+
+	return Py_BuildValue( "i", rc );
+}
+
+static PyObject *
+python_pfwrite( PyObject *self, PyObject *args ) {
+	char	*usage = "Usage: _stock._pfwrite( pfname, filename )\n";
+	char	*pfname;
+	char	*filename;
+	Pf	*pf;
+	char	errmsg[STRSZ];
+	long	rc;
+
+	if( ! PyArg_ParseTuple( args, "ss", &pfname, &filename ) ) {
+
+		USAGE;
+
+		return NULL;
+	}
+
+	if( ( pf = getPf( pfname ) ) == (Pf *) NULL ) {
+		
+		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
+
+		raise_elog( ELOG_COMPLAIN, errmsg );
+
+		return NULL;
+	}
+
+	rc = pfwrite( filename, pf );
+
+	return Py_BuildValue( "i", rc );
+}
+
+static PyObject *
+python_pf2string( PyObject *self, PyObject *args ) {
+	char	*usage = "Usage: _stock._pf2string( pfname )\n";
+	char	*pfname;
+	Pf	*pf;
+	char	*value;
+	PyObject *obj;
+	char	errmsg[STRSZ];
+
+	if( ! PyArg_ParseTuple( args, "s", &pfname ) ) {
+
+		USAGE;
+
+		return NULL;
+	}
+
+	if( ( pf = getPf( pfname ) ) == (Pf *) NULL ) {
+		
+		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
+
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -567,7 +683,7 @@ python_pf2string( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pf2xml( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pf2xml( pfname, flags = 0, prolog = None, name = None )\n";
+	char	*usage = "Usage: _stock._pf2xml( pfname, flags = 0, prolog = None, name = None )\n";
 	char	*pfname;
 	Pf	*pf;
 	char	*value;
@@ -581,7 +697,7 @@ python_pf2xml( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "sOzz", &pfname, &flags_object, &prolog, &name ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -590,7 +706,7 @@ python_pf2xml( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -628,7 +744,7 @@ python_pf2xml( PyObject *self, PyObject *args ) {
 
 	} else {
 
-		PyErr_SetString( PyExc_RuntimeError,  usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -644,7 +760,7 @@ python_pf2xml( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	char	errmsg[STRSZ];
@@ -655,7 +771,7 @@ python_pfget( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "sz", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -664,7 +780,7 @@ python_pfget( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -682,7 +798,7 @@ python_pfget( PyObject *self, PyObject *args ) {
 			sprintf( errmsg, "Failed to find parameter '%s' in parameter file '%s'\n", 
 						pfkey, pfname );
 
-			PyErr_SetString( PyExc_RuntimeError, errmsg );
+			raise_elog( ELOG_COMPLAIN, errmsg );
 
 			return NULL;
 		}
@@ -695,7 +811,7 @@ python_pfget( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_tbl( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_tbl( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_tbl( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	char	errmsg[STRSZ];
@@ -705,7 +821,7 @@ python_pfget_tbl( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -714,7 +830,7 @@ python_pfget_tbl( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -725,7 +841,7 @@ python_pfget_tbl( PyObject *self, PyObject *args ) {
 
 		sprintf( errmsg, "Failed to find parameter '%s' in parameter file '%s'\n", pfkey, pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -735,7 +851,7 @@ python_pfget_tbl( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_arr( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_arr( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_arr( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	char	errmsg[STRSZ];
@@ -745,7 +861,7 @@ python_pfget_arr( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -754,7 +870,7 @@ python_pfget_arr( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -765,7 +881,7 @@ python_pfget_arr( PyObject *self, PyObject *args ) {
 
 		sprintf( errmsg, "Failed to find parameter '%s' in parameter file '%s'\n", pfkey, pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -775,7 +891,7 @@ python_pfget_arr( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_string( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_string( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_string( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	char	*pfvalue;
@@ -784,7 +900,7 @@ python_pfget_string( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -793,7 +909,7 @@ python_pfget_string( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -804,7 +920,7 @@ python_pfget_string( PyObject *self, PyObject *args ) {
 
 		sprintf( errmsg, "Failed to find parameter '%s' in parameter file '%s'\n", pfkey, pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -814,7 +930,7 @@ python_pfget_string( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_int( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_string( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_string( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	long	pfvalue;
@@ -823,7 +939,7 @@ python_pfget_int( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -832,7 +948,7 @@ python_pfget_int( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -844,7 +960,7 @@ python_pfget_int( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_double( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_double( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_double( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	double	pfvalue;
@@ -853,7 +969,7 @@ python_pfget_double( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -862,7 +978,7 @@ python_pfget_double( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -874,7 +990,7 @@ python_pfget_double( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_size( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_size( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_size( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	double	pfvalue;
@@ -883,7 +999,7 @@ python_pfget_size( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -892,7 +1008,7 @@ python_pfget_size( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -904,7 +1020,7 @@ python_pfget_size( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_boolean( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_boolean( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_boolean( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	int	pfvalue;
@@ -913,7 +1029,7 @@ python_pfget_boolean( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -922,7 +1038,7 @@ python_pfget_boolean( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -945,7 +1061,7 @@ python_pfget_boolean( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_pfget_time( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _pfget_time( pfname, pfkey )\n";
+	char	*usage = "Usage: _stock._pfget_time( pfname, pfkey )\n";
 	char	*pfname;
 	char	*pfkey;
 	double	pfvalue;
@@ -954,7 +1070,7 @@ python_pfget_time( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "ss", &pfname, &pfkey ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -963,7 +1079,7 @@ python_pfget_time( PyObject *self, PyObject *args ) {
 		
 		sprintf( errmsg, "Failure opening parameter file '%s'\n", pfname );
 
-		PyErr_SetString( PyExc_RuntimeError, errmsg );
+		raise_elog( ELOG_COMPLAIN, errmsg );
 
 		return NULL;
 	}
@@ -975,14 +1091,14 @@ python_pfget_time( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_strtdelta( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _strtdelta( epoch )\n";
+	char	*usage = "Usage: _stock._strtdelta( epoch )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*s;
 
 	if( ! PyArg_ParseTuple( args, "d", &epoch ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1001,14 +1117,14 @@ python_strtdelta( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_strtime( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _strtime( epoch )\n";
+	char	*usage = "Usage: _stock._strtime( epoch )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*s;
 
 	if( ! PyArg_ParseTuple( args, "d", &epoch ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1027,14 +1143,14 @@ python_strtime( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_strydtime( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _strydtime( epoch )\n";
+	char	*usage = "Usage: _stock._strydtime( epoch )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*s;
 
 	if( ! PyArg_ParseTuple( args, "d", &epoch ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1053,14 +1169,14 @@ python_strydtime( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_strdate( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _strdate( epoch )\n";
+	char	*usage = "Usage: _stock._strdate( epoch )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*s;
 
 	if( ! PyArg_ParseTuple( args, "d", &epoch ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1079,14 +1195,14 @@ python_strdate( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_strlocaltime( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _strlocaltime( epoch )\n";
+	char	*usage = "Usage: _stock._strlocaltime( epoch )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*s;
 
 	if( ! PyArg_ParseTuple( args, "d", &epoch ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1105,14 +1221,14 @@ python_strlocaltime( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_strlocalydtime( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _strlocalydtime( epoch )\n";
+	char	*usage = "Usage: _stock._strlocalydtime( epoch )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*s;
 
 	if( ! PyArg_ParseTuple( args, "d", &epoch ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1131,14 +1247,14 @@ python_strlocalydtime( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_strlocaldate( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _strlocaldate( epoch )\n";
+	char	*usage = "Usage: _stock._strlocaldate( epoch )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*s;
 
 	if( ! PyArg_ParseTuple( args, "d", &epoch ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1157,14 +1273,14 @@ python_strlocaldate( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_str2epoch( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _str2epoch( string )\n";
+	char	*usage = "Usage: _stock._str2epoch( string )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*astring;
 
 	if( ! PyArg_ParseTuple( args, "s", &astring ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1178,7 +1294,7 @@ python_str2epoch( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_epoch2str( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _epoch2str( epoch, fmt, tz = None )\n";
+	char	*usage = "Usage: _stock._epoch2str( epoch, fmt, tz = None )\n";
 	PyObject *obj;
 	double	epoch;
 	char 	*fmt;
@@ -1187,7 +1303,7 @@ python_epoch2str( PyObject *self, PyObject *args ) {
 
 	if( ! PyArg_ParseTuple( args, "dsz", &epoch, &fmt, &tz ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1213,14 +1329,14 @@ python_epoch2str( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_epoch( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _epoch( yearday )\n";
+	char	*usage = "Usage: _stock._epoch( yearday )\n";
 	PyObject *obj;
 	double	e;
 	int	yd;
 
 	if( ! PyArg_ParseTuple( args, "i", &yd ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1234,14 +1350,14 @@ python_epoch( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_yearday( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _yearday( epoch )\n";
+	char	*usage = "Usage: _stock._yearday( epoch )\n";
 	PyObject *obj;
 	double	e;
-	int	yd;
+	long	yd;
 
 	if( ! PyArg_ParseTuple( args, "d", &e ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1255,13 +1371,13 @@ python_yearday( PyObject *self, PyObject *args ) {
 
 static PyObject *
 python_now( PyObject *self, PyObject *args ) {
-	char	*usage = "Usage: _now()\n";
+	char	*usage = "Usage: _stock._now()\n";
 	PyObject *obj;
 	double	epoch;
 
 	if( ! PyArg_ParseTuple( args, "" ) ) {
 
-		PyErr_SetString( PyExc_RuntimeError, usage );
+		USAGE;
 
 		return NULL;
 	}
@@ -1275,12 +1391,60 @@ python_now( PyObject *self, PyObject *args ) {
 
 static void
 add_stock_constants( PyObject *mod ) {
+	PyObject *named_constants;
+
+	named_constants = PyDict_New();
 
 	PyModule_AddIntConstant( mod, "PFXML_NEWLINES", PFXML_NEWLINES );
 	PyModule_AddIntConstant( mod, "PFXML_STRONG", PFXML_STRONG );
 	PyModule_AddIntConstant( mod, "PFXML_PRESERVE_PFFILE", PFXML_PRESERVE_PFFILE );
 	
+	PyDict_SetItemString( named_constants, "PFXML_NEWLINES", PyInt_FromLong( PFXML_NEWLINES ) );
+	PyDict_SetItemString( named_constants, "PFXML_STRONG", PyInt_FromLong( PFXML_STRONG ) );
+	PyDict_SetItemString( named_constants, "PFXML_PRESERVE_PFFILE", PyInt_FromLong( PFXML_PRESERVE_PFFILE ) );
+	
+	PyModule_AddIntConstant( mod, "ELOG_LOG", ELOG_LOG );
+	PyModule_AddIntConstant( mod, "ELOG_NOTIFY", ELOG_NOTIFY );
+	PyModule_AddIntConstant( mod, "ELOG_COMPLAIN", ELOG_COMPLAIN );
+	PyModule_AddIntConstant( mod, "ELOG_DIE", ELOG_DIE );
+	PyModule_AddIntConstant( mod, "ELOG_FAULT", ELOG_FAULT );
+	PyModule_AddIntConstant( mod, "ELOG_DEBUGGING", ELOG_DEBUGGING );
+	PyModule_AddIntConstant( mod, "ELOG_ALERT", ELOG_ALERT );
+	
+	PyDict_SetItemString( named_constants, "ELOG_LOG", PyInt_FromLong( ELOG_LOG ) );
+	PyDict_SetItemString( named_constants, "ELOG_NOTIFY", PyInt_FromLong( ELOG_NOTIFY ) );
+	PyDict_SetItemString( named_constants, "ELOG_COMPLAIN", PyInt_FromLong( ELOG_COMPLAIN ) );
+	PyDict_SetItemString( named_constants, "ELOG_DIE", PyInt_FromLong( ELOG_DIE ) );
+	PyDict_SetItemString( named_constants, "ELOG_FAULT", PyInt_FromLong( ELOG_FAULT ) );
+	PyDict_SetItemString( named_constants, "ELOG_DEBUGGING", PyInt_FromLong( ELOG_DEBUGGING ) );
+	PyDict_SetItemString( named_constants, "ELOG_ALERT", PyInt_FromLong( ELOG_ALERT ) );
+
+	PyModule_AddObject( mod, "_constants", named_constants );
+
 	return;	
+}
+
+static void
+add_elog_exception( PyObject *mod ) {
+	PyObject *dict;
+
+	dict = PyDict_New();
+
+	PyDict_SetItemString( dict, "severity", Py_None );
+
+	Py_INCREF( Py_None );
+
+	PyDict_SetItemString( dict, "string", Py_None ); 
+
+	Py_INCREF( Py_None );
+
+	_stock_ElogException = PyErr_NewException( "_stock._ElogException", PyExc_Exception, dict );
+
+	Py_INCREF( _stock_ElogException );
+
+	PyModule_AddObject( mod, "_ElogException", _stock_ElogException );
+
+	return;
 }
 
 PyMODINIT_FUNC 
@@ -1290,4 +1454,8 @@ init_stock( void ) {
 	mod = Py_InitModule( "_stock", stock_methods );
 
 	add_stock_constants( mod );
+
+	add_elog_exception( mod );
+
+	elog_set( ELOG_CALLBACK, 0, python_elog_callback );
 }

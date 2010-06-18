@@ -53,6 +53,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <string.h>
 
 #include "stock.h"
 #include "coords.h"
@@ -66,10 +67,15 @@
 
 #define IA2ORB_EXPECT_ZERO 0
 #define IA2ORB_INTERNAL_TIMEOUT 5
+#define IA2ORB_RETRIEVE_SUCCEEDED 0
+#define IA2ORB_RETRIEVE_FAILED_PERMANENT -1
+#define IA2ORB_RETRIEVE_FAILED_TRANSIENT -2
 #define PFWATCH_SLEEPTIME_SEC 1
 #define IA_BLOCKSIZE_SEC 300
+#define IA_REASONABLE_WRITETIME_SEC 30
 #define EPSILON_SEC 2
 #define MAX_SLEEPTIME_SEC ( (int) ( 1.5 * (double) IA_BLOCKSIZE_SEC ) )
+#define EXHUME_SLEEPTIME_SEC 5
 
 typedef struct ia2orb_sta {
 	char	sta[STRSZ];
@@ -89,6 +95,10 @@ typedef struct ia2orb_sta {
 	double	latest_on_server;
 	char	msdfile_target[FILENAME_MAX];
 } Ia2orb_sta;
+
+typedef struct Acqfile {
+	char	fname[FILENAME_MAX];
+} Acqfile;
 
 static Arr *Iarelics;
 
@@ -121,10 +131,10 @@ typedef struct ia2orb_config {
 	char	*orbname;
 	char	*cmdorbname;
 	char	*target;
-	char	*ia_user;
-	char	*download_dir;
-	char	*ssh;
-	char	*scp;
+	char	ia_user[STRSZ];
+	char	download_dir[FILENAME_MAX];
+	char	ssh[STRSZ];
+	char	scp[STRSZ];
 	int	max_rangerequest_sec;
 	int	reject_future_data_sec;
 	int	reject_old_request_sec;
@@ -157,6 +167,9 @@ Ia2orb_sta *new_ia2orb_sta( char *sta, char *net, char *grid, char *relay_server
 			    char *acq_mode, int byteswap );
 void free_ia2orb_sta( Ia2orb_sta **ia );
 int update_ia2orb_sta( Ia2orb_sta *ia, char *sta, char *net, char *grid, char *acq_mode, int byteswap );
+static int cmp_acqfile( void *ap, void *bp );
+int already_acquired( Ia2orb_sta *ia, char *filename );
+void register_acquired( Ia2orb_sta *ia, char *filename );
 void deactivate_ia( Ia2orb_sta *ia );
 void deactivate_ia_fromarray( char *key, void *iap, void *pvt );
 void issue_dlcmd_response( Pf *pf, char *response );
@@ -215,6 +228,8 @@ thread_register( char *name )
 	setarr( Iarun.thread_names, key, strdup( name ) );
 
 	pthread_mutex_unlock( &Iarun.threadname_mutex ); 
+
+	return;
 }
 
 void
@@ -358,11 +373,11 @@ runcmd_tbl( Tbl *args, char **result, int free_commands, int expect )
 	int	iarg;
 	char	*s;
 	char	*ns;
-	char	*null_string_message = "\t(runcmd() returned null string)";
-	char	*empty_string_message = "\t(command returned empty string)";
+	char	*null_string_message = "\t[runcmd() returned null string]";
+	char	*empty_string_message = "\t[command returned empty string]";
 	char	*string_results;
-
-	pthread_mutex_lock( &Iarun.runcmd_mutex ); 
+	char	*result_copy;
+	char	*newline_replacement;
 
 	if( args == (Tbl *) NULL || maxtbl( args ) <= 0 ) {
 
@@ -376,8 +391,6 @@ runcmd_tbl( Tbl *args, char **result, int free_commands, int expect )
 			
 			freetbl( args, 0 );
 		}
-
-		pthread_mutex_unlock( &Iarun.runcmd_mutex ); 
 
 		return 1;
 	}
@@ -405,6 +418,12 @@ runcmd_tbl( Tbl *args, char **result, int free_commands, int expect )
  
 	if( Cf.veryverbose ) {
 
+		ns = thread_name();
+
+		allot( char *, newline_replacement, STRSZ );
+
+		sprintf( newline_replacement, "\nia2orb: [thread '%s']: ", ns );
+
 		if( *result == (char *) NULL ) {
 
 			string_results = strdup( null_string_message );
@@ -415,20 +434,35 @@ runcmd_tbl( Tbl *args, char **result, int free_commands, int expect )
 
 		} else {
 
-			string_results = strdup( *result );
+			allot( char *, string_results, 10 * STRSZ );
+
+			result_copy = strdup( *result );
+
+			chomp( result_copy );
+
+			strsub( result_copy, "\n", newline_replacement, string_results );
+
+			free( result_copy );
 		}
 
 		elog_notify( 1, 
-			"[thread '%s']: Command '%s' results (exit code %d):\n%s\n\n",
-			ns = thread_name(),
-			runargv[0], rc, string_results );
+			"[thread '%s']: Command '%s' results: [exit code %d]:%s%s\n\n",
+			ns, runargv[0], rc, newline_replacement, string_results );
 
 		free( ns );
+
+		free( newline_replacement );
 
 		free( string_results );
 
 	} else if( rc != expect ) {
 
+		ns = thread_name();
+
+		allot( char *, newline_replacement, STRSZ );
+
+		sprintf( newline_replacement, "\nia2orb: [thread '%s']: ", ns );
+
 		if( *result == (char *) NULL ) {
 
 			string_results = strdup( null_string_message );
@@ -439,15 +473,24 @@ runcmd_tbl( Tbl *args, char **result, int free_commands, int expect )
 
 		} else {
 
-			string_results = strdup( *result );
+			allot( char *, string_results, 10 * STRSZ );
+
+			result_copy = strdup( *result );
+
+			chomp( result_copy );
+
+			strsub( result_copy, "\n", newline_replacement, string_results );
+
+			free( result_copy );
 		}
 
 		elog_complain( 1, 
-			"[thread '%s']: Command '%s' results (exit code %d):\n%s\n\n",
-			ns = thread_name(),
-			runargv[0], rc, string_results );
+			"[thread '%s']: Command '%s' results (exit code %d):%s%s\n\n",
+			ns, runargv[0], rc, newline_replacement, string_results );
 
 		free( ns );
+
+		free( newline_replacement );
 
 		free( string_results );
 	}
@@ -459,20 +502,17 @@ runcmd_tbl( Tbl *args, char **result, int free_commands, int expect )
 		freetbl( args, 0 );
 	}
 	
-	pthread_mutex_unlock( &Iarun.runcmd_mutex );
-
 	return rc;
 }
 
 void
 config_ia2orb()
 {
+	char	*ia_user;
+	char	*download_dir;
+	char	*ssh;
+	char	*scp;
 	char	*ns;
-
-	Cf.ia_user 	= pfget_string( Cf.pf, "ia_user" );
-	Cf.download_dir = pfget_string( Cf.pf, "download_dir" );
-	Cf.ssh 		= pfget_string( Cf.pf, "ssh" );
-	Cf.scp 		= pfget_string( Cf.pf, "scp" );
 
 	Cf.reject_future_data_sec = pfget_int( Cf.pf, "reject_future_data_sec" );
 
@@ -480,7 +520,12 @@ config_ia2orb()
 
 	Cf.max_rangerequest_sec = pfget_int( Cf.pf, "max_rangerequest_sec" );
 
-	if( Cf.ia_user == NULL ) {
+	ia_user 	= pfget_string( Cf.pf, "ia_user" );
+	download_dir 	= pfget_string( Cf.pf, "download_dir" );
+	ssh 		= pfget_string( Cf.pf, "ssh" );
+	scp 		= pfget_string( Cf.pf, "scp" );
+
+	if( ia_user == NULL ) {
 
 		elog_die( 0, 
 			"[thread '%s']: Couldn't find ia_user in parameter file; Bye.\n", 
@@ -489,7 +534,7 @@ config_ia2orb()
 		free( ns );
 	}
 
-	if( Cf.download_dir == NULL ) {
+	if( download_dir == NULL ) {
 
 		elog_die( 0, 
 			"[thread '%s']: Couldn't find download_dir in parameter file; Bye.\n", 
@@ -497,7 +542,7 @@ config_ia2orb()
 
 		free( ns );
 
-	} else if( ! is_dir( Cf.download_dir ) ) {
+	} else if( ! is_dir( download_dir ) ) {
 
 		elog_die( 0, 
 			"[thread '%s']: The 'download_dir' specified in parameter-file '$s' does not appear "
@@ -507,7 +552,7 @@ config_ia2orb()
 		free( ns );
 	}
 
-	if( Cf.ssh == NULL ) {
+	if( ssh == NULL ) {
 
 		elog_die( 0, 
 			"[thread '%s']: Couldn't find ssh in parameter file; Bye.\n", 
@@ -516,7 +561,7 @@ config_ia2orb()
 		free( ns );
 	}
 
-	if( Cf.scp == NULL ) {
+	if( scp == NULL ) {
 
 		elog_die( 0, 
 			"[thread '%s']: Couldn't find scp in parameter file; Bye.\n", 
@@ -524,6 +569,11 @@ config_ia2orb()
 
 		free( ns );
 	}
+
+	strcpy( Cf.ia_user, ia_user );
+	strcpy( Cf.download_dir, download_dir );
+	strcpy( Cf.ssh, ssh );
+	strcpy( Cf.scp, scp );
 
 	return;
 }
@@ -548,27 +598,31 @@ launch_acq_thread( Ia2orb_sta *ia )
 
 	case CONTINUOUS:
 
+		rc = pthread_create( &ia->acq_tid, NULL, ia2orb_acquire_continuous, (void *) ia );
+
 		if( Cf.veryverbose ) {
 				
 			elog_notify( 0, 
-				"[thread '%s']: Launching thread to acquire station '%s' continuously%s\n",
-				ns = thread_name(), ia->sta, byteswap_msg );
-		}
+				"[thread '%s']: Launching thread %lu to acquire station '%s' continuously%s\n",
+				ns = thread_name(), ia->acq_tid, ia->sta, byteswap_msg );
 
-		rc = pthread_create( &ia->acq_tid, NULL, ia2orb_acquire_continuous, (void *) ia );
+			free( ns );
+		}
 
 		break;
 
 	case ON_DEMAND:
 
+		rc = pthread_create( &ia->acq_tid, NULL, ia2orb_acquire_on_demand, (void *) ia );
+
 		if( Cf.veryverbose ) {
 				
 			elog_notify( 0, 
-				"[thread '%s']: Launching thread to acquire station '%s' on-demand%s\n",
-				ns = thread_name(), ia->sta, byteswap_msg );
-		}
+				"[thread '%s']: Launching thread %lu to acquire station '%s' on-demand%s\n",
+				ns = thread_name(), ia->acq_tid, ia->sta, byteswap_msg );
 
-		rc = pthread_create( &ia->acq_tid, NULL, ia2orb_acquire_on_demand, (void *) ia );
+			free( ns );
+		}
 
 		break;
 
@@ -579,12 +633,12 @@ launch_acq_thread( Ia2orb_sta *ia )
 			elog_notify( 0, 
 				"[thread '%s']: Not acquiring %s:%s\n",
 				ns = thread_name(), ia->net, ia->sta );
+
+			free( ns );
 		}
 		
 		break;
 	}
-
-	free( ns );
 
 	return;
 }
@@ -762,20 +816,24 @@ config_ia2orb_init()
 	Cf.veryverbose = 0;
 	Cf.cmdorbname = NULL;
 	Cf.instrument_network = NULL;
+	strcpy( Cf.ia_user, "" );
+	strcpy( Cf.download_dir, "" );
+	strcpy( Cf.ssh, "" );
+	strcpy( Cf.scp, "" );
 
 	return;
 }
 
 int
-delete_if_old( void *filenamep, void *acqp )
+delete_if_old( void *afp, void *acqp )
 {
 	Stbl	*acquired = (Stbl *) acqp;
-	char	*filename = (char *) filenamep;
+	Acqfile	*af = (Acqfile *) afp;
 	void	*element;
 
-	if( filename2epoch( filename ) < now() - Cf.reject_old_request_sec ) {
+	if( filename2epoch( af->fname ) < now() - Cf.reject_old_request_sec ) {
 
-		element = delstbl( acquired, (void *) filename );
+		element = delstbl( acquired, (void *) af );
 
 		free( element );
 
@@ -841,7 +899,7 @@ retrieve_block( Ia2orb_sta *ia, double reqtime )
 		free( ds );
 		free( ns );
 
-		return -1;
+		return IA2ORB_RETRIEVE_FAILED_PERMANENT;
 	}
 
 	s = epoch2filename( reqtime );
@@ -850,7 +908,7 @@ retrieve_block( Ia2orb_sta *ia, double reqtime )
 
 	free( s );
 
-	if( tststbl( ia->acquired, (void *) msdfile_source ) != (void *) NULL ) {
+	if( already_acquired( ia, msdfile_source ) ) {
 
 		if( Cf.veryverbose ) {
 
@@ -861,7 +919,7 @@ retrieve_block( Ia2orb_sta *ia, double reqtime )
 			free( ns );
 		}
 
-		return -1;
+		return IA2ORB_RETRIEVE_FAILED_PERMANENT;
 	}
 
 	sprintf( ia->msdfile_target, "%s/%s_%s",
@@ -905,7 +963,7 @@ retrieve_block( Ia2orb_sta *ia, double reqtime )
 
 		free( ns );
 
-		return -1;
+		return IA2ORB_RETRIEVE_FAILED_TRANSIENT;
 	}
 
 	if( ia->byteswap_msd_timecorr ) {
@@ -922,7 +980,7 @@ retrieve_block( Ia2orb_sta *ia, double reqtime )
 
 			free( ns );
 
-			return -1;
+			return IA2ORB_RETRIEVE_FAILED_PERMANENT;
 		}
 	}
 
@@ -966,21 +1024,58 @@ retrieve_block( Ia2orb_sta *ia, double reqtime )
 
 		free( ns );
 
-		return -1;
+		return IA2ORB_RETRIEVE_FAILED_PERMANENT;
 	}
 
 	*ia->latest_acquired = filename2epoch( msdfile_source );
 
-	addstbl( ia->acquired, (void *) strdup( msdfile_source ) );
-
-	clean_acquired_stbl( ia );
+	register_acquired( ia, msdfile_source );
 
 	if( Cf.statefile != (char *) NULL ) {
 
 		bury();
 	}
 
-	return 0;
+	return IA2ORB_RETRIEVE_SUCCEEDED;
+}
+
+int
+already_acquired( Ia2orb_sta *ia, char *filename )
+{
+	int	acquired = 0;
+
+	if( tststbl( ia->acquired, (void *) filename ) != (void *) NULL ) {
+
+		acquired = 1;
+
+	} else {
+
+		acquired = 0;
+	}
+
+	return acquired;
+}
+
+void
+register_acquired( Ia2orb_sta *ia, char *filename )
+{
+	Acqfile	*af;
+	Acqfile	*afp;
+
+	allot( Acqfile *, af, 1 );
+
+	strcpy( af->fname, filename );
+
+	if( ( afp = (Acqfile *) addstbl( ia->acquired, (void *) af ) ) != af ) {
+
+		/* Duplicate entry */
+
+		free( af );
+	}
+
+	clean_acquired_stbl( ia );
+
+	return;
 }
 
 double
@@ -1003,6 +1098,8 @@ server_latest( Ia2orb_sta *ia )
 
 	rc = runcmd_tbl( cmdargs, &result, 0, IA2ORB_EXPECT_ZERO ); 
 
+	freetbl( cmdargs, 0 );
+
 	if( rc != 0 ) {
 		
 		elog_complain( 0, 	
@@ -1018,8 +1115,6 @@ server_latest( Ia2orb_sta *ia )
 
 		return -1;
 	}
-
-	freetbl( cmdargs, 0 );
 
 	files = split( result, '\n' );
 
@@ -1038,8 +1133,12 @@ int
 retrieve_next( Ia2orb_sta *ia )
 {
 	double	candidate;
+	double	old_candidate;
 	int	estimated_sleep_sec;
 	char	*ns;
+	char	*ds;
+	char	*s;
+	char	*t;
 
 	if( ia->latest_on_server == 0 ||
 	    ia->latest_on_server <= *ia->latest_acquired ) {
@@ -1076,15 +1175,49 @@ retrieve_next( Ia2orb_sta *ia )
 
 		estimated_sleep_sec = (int) ( candidate + IA_BLOCKSIZE_SEC - now() + EPSILON_SEC );
 
+		if( estimated_sleep_sec < 0 ) {
+
+			estimated_sleep_sec = 0;
+		}
+
 	} else {
 
 		while( retrieve_block( ia, candidate ) < 0 &&
 		       candidate + IA_BLOCKSIZE_SEC < now() ) {
 			
 			candidate += IA_BLOCKSIZE_SEC;
+
+			if( Cf.reject_old_request_sec > 0 && 
+			    candidate < now() - Cf.reject_old_request_sec ) {
+
+				old_candidate = candidate;
+
+				candidate = normalize_time( now() - Cf.reject_old_request_sec + IA_BLOCKSIZE_SEC ); 
+
+				if( Cf.verbose ) {
+
+					elog_notify( 0, 	
+						"[thread '%s']: Advancing acquisition point to '%s UTC' because previous "
+						"candidate start-time '%s UTC' preceeds current system time by more than '%s'\n",
+						ns = thread_name(), 
+						s = strtime( candidate ),
+						t = strtime( old_candidate ), 
+						ds = strtdelta( Cf.reject_old_request_sec ) );
+
+					free( s );
+					free( t );
+					free( ds );
+					free( ns );
+				}
+			}
 		}
 
 		estimated_sleep_sec = (int) ( candidate + 2 * IA_BLOCKSIZE_SEC - now() + EPSILON_SEC );
+
+		if( estimated_sleep_sec < 0 ) {
+
+			estimated_sleep_sec = 0;
+		}
 	}
 
 	if( estimated_sleep_sec > MAX_SLEEPTIME_SEC ) {
@@ -1257,6 +1390,15 @@ free_ia2orb_sta( Ia2orb_sta **ia )
 	*ia = (Ia2orb_sta *) NULL;
 }
 
+static int
+cmp_acqfile( void *ap, void *bp ) 
+{
+	Acqfile *a = (Acqfile *) ap;
+	Acqfile *b = (Acqfile *) bp;
+
+	return strcmp( a->fname, b->fname );
+}
+
 Ia2orb_sta *
 new_ia2orb_sta( char *sta, char *net, char *grid, char *relay_server_ip, char *relay_port, 
 	        char *acq_mode, int byteswap )
@@ -1298,7 +1440,7 @@ new_ia2orb_sta( char *sta, char *net, char *grid, char *relay_server_ip, char *r
 
 	ia->latest_on_server = 0;
 
-	ia->acquired = newstbl( 0 );
+	ia->acquired = newstbl( cmp_acqfile );
 
 	strcpy( ia->msdfile_target, "" );
 
@@ -1372,11 +1514,11 @@ ia2orb_pfwatch( void *arg )
 
 		rc = pfupdate( Cf.pfname, &Cf.pf );
 
-		config_ia2orb();
-
 		if( first ) {
 
 			first = 0;
+
+			config_ia2orb();
 
 			if( Cf.veryverbose ) {
 
@@ -1728,6 +1870,9 @@ ia2orb_acquire_on_demand( void *iap )
 	Ia2orb_sta *ia = (Ia2orb_sta *) iap;
 	Ia2orb_req *iar = NULL;
 	char	threadname[STRSZ];
+	char	*ns;
+	char	*s;
+	int	estimated_sleeptime_sec;
 	int	old;
 	int	rc;
 
@@ -1763,9 +1908,32 @@ ia2orb_acquire_on_demand( void *iap )
 
 		pthread_setcancelstate( PTHREAD_CANCEL_DISABLE, &old );
 
-		retrieve_block( ia, iar->reqtime );
+		rc = retrieve_block( ia, iar->reqtime );
 
-		if( iar != (Ia2orb_req *) NULL ) {
+		if( rc == IA2ORB_RETRIEVE_FAILED_TRANSIENT &&
+		    iar->reqtime > now() - IA_BLOCKSIZE_SEC - IA_REASONABLE_WRITETIME_SEC ) {
+
+			estimated_sleeptime_sec = 
+			    (int) rint( iar->reqtime + IA_BLOCKSIZE_SEC + IA_REASONABLE_WRITETIME_SEC - now() );
+
+			if( Cf.veryverbose ) {
+
+				elog_notify( 0, 	
+					"[thread '%s']: Sleeping %d seconds and re-posting on-demand data request "
+					"because start-time '%s UTC' is close to or less than one IA block-size "
+					"(%d sec) before system-clock time\n",
+					ns = thread_name(), estimated_sleeptime_sec,
+					s = strtime( iar->reqtime ), IA_BLOCKSIZE_SEC );
+
+				free( s );
+				free( ns );
+			}
+
+			sleep( estimated_sleeptime_sec );
+
+			pmtfifo_push( ia->mtf, (void *) iar );
+
+		} else if( iar != (Ia2orb_req *) NULL ) {
 
 			free( iar );
 		}
@@ -1859,7 +2027,7 @@ main( int argc, char **argv )
 
 	if( Cf.statefile != (char *) NULL ) {
 
-		rc = exhume( Cf.statefile, &Iarun.Stop, MAX_SLEEPTIME_SEC, 0 );
+		rc = exhume( Cf.statefile, &Iarun.Stop, EXHUME_SLEEPTIME_SEC, 0 );
 
 		if( rc < 0 ) {
 

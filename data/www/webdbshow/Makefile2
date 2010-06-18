@@ -1,0 +1,16 @@
+DATADIR= www/cgibin
+
+DATA= webdbshow.php 
+
+PF = webdbshow.pf
+
+MAN3H= webdbshow.3h
+
+CLEAN = *.php
+
+ANTELOPEMAKELOCAL = $(ANTELOPE)/local/include/antelopemake.local
+
+include $(ANTELOPEMAKE)
+include $(ANTELOPEMAKELOCAL)
+
+SUBDIR= /local

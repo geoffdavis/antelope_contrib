@@ -24,7 +24,7 @@ escapes &Tbl{
 default_expressions make
 
 make &Arr{
-   red &Tbl{
+   red &Tbl{							# Serious problems
 	^\\*\\*\\* Error code
 	^.* error:
 	^Error:
@@ -55,13 +55,14 @@ make &Arr{
 	^[[:digit:]]+ errors$
 	^[[:space:]]*format_type can't format
 	^[[:space:]]*parse_function doesn't understand 
+	^localmake_config:.*is not defined
    }
-   green &Tbl{
+   green &Tbl{							# Directory navigation
 	^\\+[[:space:]]+[^[:space:]]+
 	^make.*: Entering directory
 	^make.*: Leaving directory
    }
-   magenta &Tbl{
+   magenta &Tbl{						# Warning and potential problems
 	^Problem: [^[:space:]]+\\.[[:digit:]][[:alpha:]]? :
 	^.*(gcc|g\\+\\+).*: unrecognized option
 	^.*gcc.*: linker input file unused
@@ -91,8 +92,13 @@ make &Arr{
 	^Undefined[[:space:]]+first referenced
 	^[[:space:]]symbol[[:space:]]+in file
 	^WARNING:
+	^Unsupported system
+	^localmake_config:.*pf_revision_time.*
+	^.*but program requires date after.*
+	^localmake_config:.*appears out of date
+	^You may be missing features
    }
-   cyan &Tbl{
+   cyan &Tbl{							# Routine command output
 	^---+
 	^->[[:space:]]+[[:upper:]]+[[:space:]]+=[[:space:]]
 	^->[[:space:]]+[[:upper:]] flags: 
@@ -107,6 +113,11 @@ make &Arr{
 	^ar: creating
 	^ar: writing
 	^amakelocal:
+	^localmake_config:.*marked as disabled
+	^localmake:
+	^Run localmake_config
+	^to enable and configure
+	^to configure
 	^[[:alnum:]_]+\\.[fF]:$
 	^[[:space:]]*MAIN:$
 	^[[:space:]]+MAIN [[:alnum:]_]+:$
@@ -118,7 +129,7 @@ make &Arr{
 	^make\\[[[:digit:]]+\\]:.*is up to date
 	^NOTICE:
 	^Current working directory
-	^Optimizing from Makefile
+	^.*Optimizing from Makefile
 	^Instrumenting:
 	^Purify engine:
 	^Purify.*Copyright
@@ -139,7 +150,7 @@ make &Arr{
 	^output=
 	^uninstalling
    }
-   blue &Tbl{
+   blue &Tbl{							# Commands executed
 	^ar[[:space:]]
 	^awk[[:space:]]
 	^[[:space:]]*cat
@@ -153,6 +164,7 @@ make &Arr{
 	^gcc[[:space:]]
 	^g\\+\\+[[:space:]]
 	^-> gcc([-.0-9]*)?[[:space:]]
+	^dsymutil[[:space:]]
 	^[( ]*cd[[:space:]]
 	^chmod[[:space:]]
 	^compile[[:space:]]
@@ -232,6 +244,7 @@ cvs &Arr{
 ia2orb &Arr{
    red &Tbl{
 	.*Failed to list contents
+	.*Failed to open.*orbserver
 	.*Shutting down
 	.*Connection closed by remote host
 	.*Permission denied
@@ -245,24 +258,34 @@ ia2orb &Arr{
    }
    blue &Tbl{
    	.*Executing
-	.*Command
-   	.*Acquiring
+   	.*Acquiring file
 	.*Launching thread
 	.*Retrieving state information
 	.*Opened.*orb
 	.*Configuring acquisition threads
+	.*Received command packet
+	.*Issued acquisition-request
+	.*Deleted.*entries
    }
    magenta &Tbl{
    	.*harmless--continuing
 	.*Attempted but failed to resurrect
 	.*Failed to reposition
-	.*Ignoring data request because
+	.*Ignoring
 	.*No such file or directory
 	.*Failed to acquire
+	.*Failure parsing ia_network array row
+	.*Acquisition mode.*not understood
+	.*disappeared from ia_network array
+	.*Failed to upload.*to orbserver
+	.*Failed to exhume state information
+	.*Failed to reposition command-orb
+	.*miniseed2orb: Couldn.*open
+	.*Interrupted system call
    }
    cyan &Tbl{
 	.*command returned empty string
-	^[[:digit:]]+.[[:digit:]]+.MSD
+	^.*[[:digit:]]+.[[:digit:]]+.MSD
 	.*stations in the ia_network
 	.*Resurrected
 	.*Watching
@@ -271,13 +294,23 @@ ia2orb &Arr{
 	.*Initiated state tracking
 	.*Sleeping.*seconds
 	.*miniseed2orb.*notify
+	.*miniseed2orb: wrote
+	.*miniseed2orb:.*blocks.*from 
 	.*from.*files in
 	.*blocks.second
 	.*Mbyte.sec
 	.*Re-configuring acquisition threads
 	.*Cancelling acquisition thread
 	.*successfully cancelled
+	.*Command.*results
 	.*Continuing.*in response to resurrection request
+	.*Repositioned command-orb
+	.*Advancing acquisition point
+	.*No new files
+	^command[[:space:]]
+	^time[[:space:]]
+	^start[[:space:]]
+	^end[[:space:]]
    }
 }
 

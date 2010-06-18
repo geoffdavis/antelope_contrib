@@ -17,7 +17,10 @@ the \fBlocalmake\fP parameter file) on which a particular software
 component depends. If the \fI-t\fP option is used, \fBlocalmake\fP will 
 further assemble the resulting compiled components into a platform-specific
 tar file which may be distributed for use on identically configured 
-machines elsewhere. 
+machines elsewhere. Depending on the components being compiled and how 
+their makefiles are structured, the location into which results are 
+installed may be $ANTELOPE/local rather than $ANTELOPE. 
+
 .SH OPTIONS
 .IP -l
 Print a list of available modules and exit. 
@@ -27,8 +30,6 @@ verbose
 Specify an alternate parameter file
 .IP -t
 Create a tarball of the compiled \fImodule\fP and files on which it depends
-.SH FILES
-.SH ENVIRONMENT
 .SH PARAMETER FILE
 .IP tarball_time_format
 This parameter specifies the time format (in the format of epoch2str(3))
@@ -40,7 +41,9 @@ should be unique, descriptive names for the software \fImodules\fP. The values
 are arrays with the parameters for how to build and package each \fImodule\fP. 
 .IP "modules{<module_name>}{build}"
 This parameter is a table of directories relative to $ANTELOPE containing the 
-source code for the software \fImodule\fP and all of its dependencies. When 
+source code for the software \fImodule\fP and all of its dependencies (although 
+if any of the directory names begins with a '/' character it is assumed to be 
+an absolute path, and $ANTELOPE is not prepended). When 
 \fBlocalmake\fP is told to build a given software package, it enters each of 
 these directories in turn and executes 'make install'. 
 .IP "modules{<module_name>}{package}"
@@ -51,14 +54,16 @@ all pieces of compiled code and supporting files comprising a given software
 
 tarball_time_format %Y_%m_%d
 
+contrib_src_subdir src/contrib
+
 modules &Arr{
 	dbxcor &Arr{
 		build &Tbl{
-			src/contrib/lib/graphics/seisw
-			src/contrib/lib/seismic/libseispp
-			src/contrib/lib/utility/libgclgrid
-			src/contrib/lib/perf
-			src/contrib/bin/db/dbxcor
+			&contrib_src_subdir/lib/graphics/seisw
+			&contrib_src_subdir/lib/seismic/libseispp
+			&contrib_src_subdir/lib/utility/libgclgrid
+			&contrib_src_subdir/lib/perf
+			&contrib_src_subdir/bin/db/dbxcor
 		}
 		package &Tbl{
 			static/libsciplot.a
@@ -131,7 +136,7 @@ modules &Arr{
 	}
 	python_antelope &Arr{
 		build &Tbl{
-			src/contrib/data/python
+			&contrib_src_subdir/data/python
 		}
 		package &Tbl{
 			lib/python__datascope.dylib 
@@ -162,13 +167,9 @@ modules &Arr{
 .fi
 .ft R
 .in
-.SH RETURN VALUES
-.SH LIBRARY
-.SH ATTRIBUTES
-.SH DIAGNOSTICS
 .SH "SEE ALSO"
 .nf
-antelopemake(5), antelopemakelocal(5), amakelocal(1)
+localmake_config(1), antelopemake(5), antelopemakelocal(5) 
 .fi
 .SH "BUGS AND CAVEATS"
 The package contents are actually a bit platform-specific, which is not 
@@ -181,6 +182,18 @@ The \fBlocalmake\fP.pf contents are highly detailed and contingent on insider
 knowledge of the piece of software being built. It is intended that these 
 package descriptions be written by the author of the relevant piece 
 of code. 
+
+The \fBlocalmake\fP GUI will restart itself after compiling a module named
+\fIbootstrap\fP. The \fIbootstrap\fP module allows the \fBlocalmake\fP
+and \fBlocalmake_config\fP compilation facility easily updatable between 
+official Antelope releases. 
+
+\fBlocalmake\fP will sometimes report success in compilation even though it 
+has failed somewhere along the line. This is due to an internal weakness in the 
+way it spawns subsidiary make commands, a weakness which could be fixed but at a cost 
+not yet allocated. Make sure to scan compilation output for evidence of errors (these 
+should be fairly prominent in the colored-output when running \fBlocalmake\fP
+as a GUI). 
 .SH AUTHOR
 Kent Lindquist
 Lindquist Consulting, Inc.

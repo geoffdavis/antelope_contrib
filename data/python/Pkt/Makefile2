@@ -17,8 +17,12 @@ fflags=
 ldflags= 
 ldlibs= $(ORBLIBS)
 
+ANTELOPEMAKELOCAL = $(ANTELOPE)/local/include/antelopemake.local
+
 include $(ANTELOPEMAKE)
-include $(ANTELOPEMAKE).local
+include $(ANTELOPEMAKELOCAL)
+
+SUBDIR= /local
 
 ORBOBJS= _Pkt.o
 

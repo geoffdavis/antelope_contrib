@@ -1,6 +1,11 @@
 DATADIR = www/dbwfserver
-DATA = index.html.template
+DATA = waveform.html.template
+
+ANTELOPEMAKELOCAL = $(ANTELOPE)/local/include/antelopemake.local
 
 include $(ANTELOPEMAKE)
+include $(ANTELOPEMAKELOCAL)
 
-DIRS = static jquery
+SUBDIR= /local
+
+DIRS = static
