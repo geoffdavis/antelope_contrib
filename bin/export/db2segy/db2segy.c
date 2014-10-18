@@ -121,7 +121,7 @@ initialize_header(SegyHead *header)
 	header->trigminute = htons(0);
 	header->trigsecond = htons(0);
 	header->trigmills  = htons(0);
-	header->scale_fac = htonfp(0);
+	header->scale_fac = htonf(0);
 	header->inst_no = htons(0);
 	header->not_to_be_used = htons(0);
 	header->num_samps = htonl(0);
@@ -705,7 +705,7 @@ r
 	numerical recipes routine found in libgenloc.  This is not
 	the most efficient way to do this, but it simplifies the
 	algorithm a lot. */
-	traces = matrix(0, nchan, htonfp(0), nsamp0);
+	traces = matrix(0, nchan, htonf(0), nsamp0);
 	if(traces == NULL)
 		elog_die(0,"Cannot alloc trace data matrix work space of size %d by %d\n",
 			nchan, nsamp0);
@@ -768,7 +768,7 @@ r
 			}
 			header[i].event_number   = htonl(shotid);
 			header[i].energySourcePt = htonl(shotid);
-			for(j=0;j<nsamp0;++j)  traces[i][j] = htonfp((Trsample)0.0);
+			for(j=0;j<nsamp0;++j)  traces[i][j] = htonf((Trsample)0.0);
 		}
 		if(input_source_coordinates)
 		{
@@ -875,7 +875,7 @@ r
 					shotid, evid);
 				header[ichan].traceID = htons(1);
 				for(j=0;j<nsamp;++j)
-				   traces[ichan][j] = htonfp((float)trdata[j]);
+				   traces[ichan][j] = htonf((float)trdata[j]);
 				/* header fields coming from trace table */
 				header[ichan].samp_rate = htonl(
 						(int32_t) (1000000.0/samprate0));
@@ -925,7 +925,7 @@ r
 				header[ichan].hour   = htons(hhour);
 				header[ichan].minute = htons(hminute);
 				header[ichan].second = htons(hsecond);
-				header[ichan].m_secs = htons(m_secs);
+				header[ichan].m_secs = htons(hm_secs);
 				/* These are PASSCAL extensions, but we'll
 				go ahead and set them anyway.*/
 				header[ichan].trigyear   = header[ichan].year;
