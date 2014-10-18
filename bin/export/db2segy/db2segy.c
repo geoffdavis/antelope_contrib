@@ -1,11 +1,11 @@
 /* Data format converter for binary seismic data.  This program is sort
-of an inverse to segy2css.  It maps everything it reasonably can onto 
+of an inverse to segy2css.  It maps everything it reasonably can onto
 the segy header.  There are drastic differences between what segy was
 written for and the css3.0 schema, so there are strong limitations
 in this.  The program works around a parameter file in which there
 are two critical components:
 1.  The "channels" tbl defines the output order of channels.  The program
-builds an arr keyed to sta_chan that is used to build the output 
+builds an arr keyed to sta_chan that is used to build the output
 multichannel volume.  This part of the parameter file will define
 the order of channels in the output segy volume.
 
@@ -13,14 +13,14 @@ the order of channels in the output segy volume.
 a general rotation mechanism.  Basically, the program can optional
 transform all it's data an arbitrary set of orthonormal coordinate
 axes.   The channel list has to reflect this case by using channel
-codes R, Z, and T.  
+codes R, Z, and T.
 
-The program read a set of start times from stdin that are used to 
-define different events that are to be written to the segy output 
+The program read a set of start times from stdin that are used to
+define different events that are to be written to the segy output
 volume.  segy REQUIRES fixed length records and fixed sample rates.
 The record length is defined in the parameter file.  The sample rate
 needs to be defined in the parameter file also.  Any deviations from
-that sample rate will cause the program to die.  
+that sample rate will cause the program to die.
 
 Author:  Gary L. Pavlis
 Written:  November 1998 in a hack form.  This version is a descendent
@@ -37,8 +37,10 @@ that recycled some of the original code written in February 1999.
 #include "elog.h"
 #include "segy.h"
 #include "location.h"
+#include "deviants.h"
+#include <arpa/inet.h>
 #define min(a,b) ((a) <= (b) ? (a) : (b))
-/* Newer compilers will complain if these prototypes are not defined.  
+/* Newer compilers will complain if these prototypes are not defined.
 Could be placed in segy.y, but that would strike me as mysterious. */
 
 void initialize_header(SegyHead *header);
@@ -61,95 +63,95 @@ usage()
 void
 initialize_header(SegyHead *header)
 {
-	header->lineSeq = 1;
-	header->event_number = 1;
-	header->channel_number = 1;
-	header->energySourcePt = 1;
-	header->cdpEns = 0;
-	header->traceInEnsemble = 0;
-	header->traceID = 2;  /* note default is dead */
-	header->vertSum = 0;
-	header->dataUse = 0;
-	header->sourceToRecDist = 0;
-	header->recElevation = 0;
-	header->sourceSurfaceElevation = 0;
-	header->sourceDepth = 0;
-	header->datumElevRec = 0;
-	header->recWaterDepth = 0;
-	header->elevationScale = 1;
-	header->coordScale = 1;
-	header->sourceLongOrX = 0;
-	header->recLongOrX = 0;
-	header->coordUnits = 1;  /* This sets units to m */
-	header->weatheringVelocity = 0;
-	header->subWeatheringVelocity = 0;
-	header->sourceUpholeTime = 0;
-	header->sourceStaticCor = 0;
-	header->totalStatic = 0;
-	header->lagTimeA = 0;
-	header->delay = 0;
-	header->muteStart = 0;
-	header->sampleLength = 0;
-	header->deltaSample = 0;
-	header->gainType = 0;
-	header->gainConst = 0;
-	header->correlated = 0;
-	header->sweepStart = 0;
-	header->sweepLength = 0;
-	header->sweepType = 0;
-	header->sweepTaperAtStart = 0;
-	header->taperType = 0;
-	header->aliasFreq = 0;
-	header->notchFreq = 0;
-	header->lowCutFreq = 0;
-	header->lowCutSlope = 0;
-	header->year = 0;
-	header->timeBasisCode = 2;  /* this means gmt time */
-	header->traceWeightingFactor = 0;
-	header->phoneRollPos1 = 0;
-	header->gapSize = 0;
-	header->taperOvertravel = 0;
-	header->extrash[10] = 0;
-	header->samp_rate = 0;
+	header->lineSeq = htonl(1);
+	header->event_number = htonl(1);
+	header->channel_number = htonl(1);
+	header->energySourcePt = htonl(1);
+	header->cdpEns = htonl(0);
+	header->traceInEnsemble = htonl(0);
+	header->traceID = htonl(2);  /* note default is dead */
+	header->vertSum = htons(0);
+	header->dataUse = htons(0);
+	header->sourceToRecDist = htonl(0);
+	header->recElevation = htonl(0);
+	header->sourceSurfaceElevation = htonl(0);
+	header->sourceDepth = htonl(0);
+	header->datumElevRec = htonl(0);
+	header->recWaterDepth = htonl(0);
+	header->elevationScale = htons(1);
+	header->coordScale = htons(1);
+	header->sourceLongOrX = htonl(0);
+	header->recLongOrX = htonl(0);
+	header->coordUnits = htons(1);  /* This sets units to m */
+	header->weatheringVelocity = htons(0);
+	header->subWeatheringVelocity = htons(0);
+	header->sourceUpholeTime = htons(0);
+	header->sourceStaticCor = htons(0);
+	header->totalStatic = htons(0);
+	header->lagTimeA = htons(0);
+	header->delay = htons(0);
+	header->muteStart = htons(0);
+	header->sampleLength = htons(0);
+	header->deltaSample = htons(0);
+	header->gainType = htons(0);
+	header->gainConst = htons(0);
+	header->correlated = htons(0);
+	header->sweepStart = htons(0);
+	header->sweepLength = htons(0);
+	header->sweepType = htons(0);
+	header->sweepTaperAtStart = htons(0);
+	header->taperType = htons(0);
+	header->aliasFreq = htons(0);
+	header->notchFreq = htons(0);
+	header->lowCutFreq = htons(0);
+	header->lowCutSlope = htons(0);
+	header->year = htons(0);
+	header->timeBasisCode = htons(0);  /* this means gmt time */
+	header->traceWeightingFactor = htons(0);
+	header->phoneRollPos1 = htons(0);
+	header->gapSize = htons(0);
+	header->taperOvertravel = htons(0);
+	header->extrash[10] = htons(0);
+	header->samp_rate = htonl(0);
 	/* Always ieee floats in this program for now */
-	header->data_form = 5;
-	header->trigyear = 0 ;
-	header->trigday=0;
-	header->trighour=0;
-	header->trigminute=0;
-	header->trigsecond=0;
-	header->trigmills = 0;
-	header->scale_fac = 0;
-	header->inst_no = 0;
-	header->not_to_be_used = 0;
-	header->num_samps = 0;
+	header->data_form  = htons(5);
+	header->trigyear   = htons(0);
+	header->trigday    = htons(0);
+	header->trighour   = htons(0);
+	header->trigminute = htons(0);
+	header->trigsecond = htons(0);
+	header->trigmills  = htons(0);
+	header->scale_fac = htonfp(0);
+	header->inst_no = htons(0);
+	header->not_to_be_used = htons(0);
+	header->num_samps = htonl(0);
 	header->extra[8] = 0;
-	header->reelSeq=1;
-	header->horSum=0;
-	header->datumElemSource=0;
-	header->sourceWaterDepth=0;
-	header->sourceLatOrY = 0;
-	header->recLatOrY=0;
-	header->recUpholeTime=0;
-	header->recStaticCor=0;
-	header->lagTimeB = 0 ;
-	header->muteEnd=0;
-	header->sweepTaperAtEnd=0;
-	header->aliasSlope=0;
-	header->notchSlope=0;
-	header->hiCutFreq=0;
-	header->hiCutSlope=0;
-	header->day=0;
-	header->hour=0;
-	header->minute=0;
-	header->second=0;
- 	header->phoneFirstTrace=0;
-	header->phoneLastTrace=0;
-	header->m_secs=0;
-	header->initialGain=0;
-	header->sweepEnd=0;
+	header->reelSeq = htonl(1);
+	header->horSum = htons(0);
+	header->datumElemSource = htonl(0);
+	header->sourceWaterDepth = htonl(0);
+	header->sourceLatOrY = htonl(0);
+	header->recLatOrY = htonl(0);
+	header->recUpholeTime = htons(0);
+	header->recStaticCor = htons(0);
+	header->lagTimeB = htons(0);
+	header->muteEnd = htons(0);
+	header->sweepTaperAtEnd = htons(0);
+	header->aliasSlope = htons(0);
+	header->notchSlope = htons(0);
+	header->hiCutFreq = htons(0);
+	header->hiCutSlope = htons(0);
+	header->day    = htons(0);
+	header->hour   = htons(0);
+	header->minute = htons(0);
+	header->second = htons(0);
+ 	header->phoneFirstTrace = htons(0);
+	header->phoneLastTrace  = htons(0);
+	header->m_secs = htons(0);
+	header->initialGain = htons(0);
+	header->sweepEnd    = htons(0);
 }
-/* companion to below to build associative array key. 
+/* companion to below to build associative array key.
 Key is sta_chan with s=station and c-channel code */
 char *make_key(char *s, char *c)
 {
@@ -161,8 +163,8 @@ char *make_key(char *s, char *c)
         return(strdup(tkey));
 }
 
-/* This small function builds a keyed list of channel codes 
-from a list in a parameter file and returns this as an 
+/* This small function builds a keyed list of channel codes
+from a list in a parameter file and returns this as an
 associative array "a".  The function returns the number of
 channels actually found in the list.*/
 
@@ -187,7 +189,7 @@ Arr *build_stachan_list(Pf *pf, int *nchan,int verbose)
 		sscanf(line,"%s %s",sta,chan);
 		key = make_key(sta,chan);
 		channel_number = (int *) malloc(sizeof(int));
-		if(channel_number == NULL) 
+		if(channel_number == NULL)
 			elog_die(0,"malloc error for channel_number\n");
 		*channel_number = i;
 		setarr(a,key,(void *)channel_number);
@@ -209,26 +211,26 @@ int get_channel_index(Arr *a, char *sta, char *chan)
 	int *ichan;
 	key = make_key(sta,chan);
 	ichan = (int *)getarr(a,key);
-	if(ichan == NULL) 
+	if(ichan == NULL)
 		return(-1);
 	else
 		return(*ichan);
 }
 
-	
-		
-/* This routine looks for a Tbl in the parameter space that 
-defines a set of auxiliary tables that are to be used.  It 
-cautiously checks to see if that table is defined in the 
+
+
+/* This routine looks for a Tbl in the parameter space that
+defines a set of auxiliary tables that are to be used.  It
+cautiously checks to see if that table is defined in the
 schema and is nonempty.  It sets logical variables in associative
 array it returns that define if the table is "ok".  This is serious
-overkill added to make the code for expandable in the future. 
+overkill added to make the code for expandable in the future.
 At the moment the only table that would be used is "shot".
 It would, however, be easy to add similar auxiliary tables for
 segy constructs like statics, mute definition, etc.  In that
 case there probably should be a more general mechanism than this
 but I'm more or less laying out a useful functionality here rather
-than doing it in a completely general way.  
+than doing it in a completely general way.
 */
 Arr *check_tables(Dbptr db, Pf *pf)
 {
@@ -254,14 +256,14 @@ Arr *check_tables(Dbptr db, Pf *pf)
 		not empty.  */
 		table = (char *)gettbl(t,i);
 		dbtmp = dblookup(db,0,table,0,0);
-		if(dbtmp.table == dbINVALID) 
+		if(dbtmp.table == dbINVALID)
 			table_ok = 0;
 		else
 			table_ok = 1;
 		if(table_ok)
 		{
 			dbquery(dbtmp,dbRECORD_COUNT,&nrec);
-			if(nrec > 0) 
+			if(nrec > 0)
 				table_ok = 1;
 			else
 				table_ok = 0;
@@ -305,9 +307,9 @@ table.
 
 Note this function is somewhat less general than it could be.
 With a little work one could have the parameter file specify
-a set of join keys and (optionally) even use a theta join.  
+a set of join keys and (optionally) even use a theta join.
 I took the easy way out and decided to only use the natural
-join mechanism.  
+join mechanism.
 */
 
 Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables)
@@ -332,7 +334,7 @@ Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables)
 	{
 		table_name = gettbl(t,i);
 		ilogic = (int *)getarr(tables,table_name);
-		if(ilogic == NULL) 
+		if(ilogic == NULL)
 		{
 			elog_die(0,"Table %s was not handled previously by check_tables.\nProgramming logic error\n",
 				table_name);
@@ -359,7 +361,7 @@ Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables)
 	return(dbj);
 }
 
-	
+
 
 void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h)
 {
@@ -375,7 +377,7 @@ void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h)
 		sprintf(ss_string,"evid == %d",evid);
 		db = dbsubset(db,ss_string,0);
 		dbquery(db,dbRECORD_COUNT,&ntest);
-		if(ntest <= 0) 
+		if(ntest <= 0)
 		{
 			elog_complain(0,"evid %d not found in shot table\nShot coordinates will not be saved in segy headers\n",
 				evid);
@@ -393,7 +395,7 @@ void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h)
 			"deast", &deast,
 			"elev", &elev,
 			"edepth",&edepth,
-				NULL) == dbINVALID) 
+				NULL) == dbINVALID)
 		{
 			elog_complain(0,"dbgetv error for evid %d\nShot coordinates will not be saved in segy headers\n",
 				evid);
@@ -402,27 +404,29 @@ void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h)
 		/*convert to m from km */
 		deast *= 1000.0;
 		dnorth *= 1000.0;
-		h->sourceLongOrX = (int32_t) deast;
-		h->sourceLatOrY = (int32_t) dnorth;
-		h->sourceSurfaceElevation = (int32_t)elev;
-		h->sourceDepth = (int32_t)edepth;
+		h->sourceLongOrX          = htonl((int32_t) deast);
+		h->sourceLatOrY           = htonl((int32_t) dnorth);
+		h->sourceSurfaceElevation = htonl((int32_t) elev);
+		h->sourceDepth            = htonl((int32_t) edepth);
 		/* WARNING:  This assumes receiver coordinates have already been set */
-		h->sourceToRecDist = (int32_t) hypot(dnorth - ((double)(h->recLatOrY)),
-						deast - ((double)(h->recLongOrX)) );
+		h->sourceToRecDist = htonl( (int32_t) hypot(
+					dnorth - ((double)(ntohl(h->recLatOrY ))),
+					deast  - ((double)(ntohl(h->recLongOrX)))
+		));
 	}
 	dbfree(db);
 }
 /* The trace library routines that existed at the time this code
 was written were heavy handed about dealing with taps.  trload_css
-calls trgetwf which in turn calls gaps2tr.  This sets all gaps to 
-the fillgap value for the specified data type.  Unfortunately, 
+calls trgetwf which in turn calls gaps2tr.  This sets all gaps to
+the fillgap value for the specified data type.  Unfortunately,
 this causes a problem with clipped data.  A clip is indeed a "gap"
 of a type, but there is a difference between a + and - full scale
 reading.  We call tr2gaps below, which is not a clean inverse
-of gaps2tr because it only recovers the + full scale values 
-correctly leaving a worse tear for negative values.  I circumvent 
+of gaps2tr because it only recovers the + full scale values
+correctly leaving a worse tear for negative values.  I circumvent
 this here by checking the sign of the sample preceeding a gap and
-flipping the sign when appopriate.  
+flipping the sign when appopriate.
 */
 void repair_gaps(Dbptr trdb)
 {
@@ -466,8 +470,6 @@ void repair_gaps(Dbptr trdb)
 				trdata[i0] = (Trsample)0.0;
 				++i0;
 			}
- 
-
 		}
 		else
 		{
@@ -499,10 +501,10 @@ void repair_gaps(Dbptr trdb)
 		}
 	}
 }
-		
 
-		
-		
+
+
+
 
 int main(int argc, char **argv)
 {
@@ -511,7 +513,7 @@ int main(int argc, char **argv)
 	char *dbin;
 	char *outfile;
 	FILE *fp;
-	Pf *pf;  
+	Pf *pf;
 	Arr *channels;  /* channel order list */
 	Arr *table_list;  /* array of valid tables */
 	int nchan;
@@ -520,7 +522,7 @@ int main(int argc, char **argv)
 	float **traces;
 	char reel1[3200];
 	Dbptr db, trdb, dbj;
-	Dbptr trdbss;  
+	Dbptr trdbss;
 	int nsamp0;
 	double time0, endtime0, samprate0;
 	long int nsamp;
@@ -553,18 +555,18 @@ int main(int argc, char **argv)
 	time field is read and remainder of any input on each line is dropped.*/
 	int input_source_coordinates;
 	/* scale factor for source coordinates.  Needed because segy uses
-	an int to store source coordinates.  Sensible choices are 
+	an int to store source coordinates.  Sensible choices are
 	3600 for arc seconds and 10000 for a pseudodecimal. Note this
 	parameter is ignored unless input_source_coordinates is true.*/
 	int coordScale;
-	/* If true use passcal 32 bit extension num_samps as record length. 
+	/* If true use passcal 32 bit extension num_samps as record length.
 	SEGY standard uses a 16 bit entry that easily overflows with large
 	shots at long offset.  In this ase assume the 16 bit quantity is
 	meaningless. */
 	int use_32bit_nsamp;
 	/* This is switched on by argument switch.  When set to a nonzero
 	(default) the reel headers are written.  When 0 `
-	the reel heades will not be written -- used by seismic unix 
+	the reel heades will not be written -- used by seismic unix
 r
 	and passcal*/
 	int write_reel_headers=1;
@@ -603,7 +605,7 @@ r
 
 	elog_init(argc, argv);
 
-	if(pfread(pfname,&pf)) 
+	if(pfread(pfname,&pf))
 		elog_die(0,"pfread error for pf file %s.pf\n",argv[0]);
 	/* rotation parameters */
 	rotate=pfget_boolean(pf,"rotate");
@@ -617,18 +619,18 @@ r
 	channels = build_stachan_list(pf,&nchan,Verbose);
 
 	map_to_cdp = pfget_boolean(pf,"map_to_cdp");
-	if(map_to_cdp && Verbose) 
+	if(map_to_cdp && Verbose)
 		fprintf(stdout,"Casting data as CDP stacked section\n");
-	if(dbopen(dbin,"r",&db) == dbINVALID) 
+	if(dbopen(dbin,"r",&db) == dbINVALID)
 	{
 		fprintf(stderr,"Cannot open db %s\n", dbin);
 		usage();
 	}
 	/* We grab the sample rate and trace length (in seconds) and
-	use this to define global sample rates for the data.  
+	use this to define global sample rates for the data.
 	segy REQUIRES fixed length records and sample rates, so
-	irregular sample rates will cause this program to die. 
-	One could add a decimate/interpolate function, but this 
+	irregular sample rates will cause this program to die.
+	One could add a decimate/interpolate function, but this
 	is not currently implemented */
 	samprate0 = pfget_double(pf,"sample_rate");
 	tlength = pfget_double(pf,"trace_length");
@@ -637,7 +639,7 @@ r
 
 	/* nsamp in segy is a 16 bit field.  Handling depends on
 	setting of use_32bit_nsamp boolean */
-	if(nsamp0 > 32767) 
+	if(nsamp0 > 32767)
 	{
 	    if(use_32bit_nsamp)
 	    {
@@ -662,7 +664,7 @@ r
 	/* boolean.  When nonzero set coordinates as geographic arc seconds values */
 	int use_geo_coordinates=pfget_boolean(pf,"use_geo_coordinates");
 	/* check list of tables defined in pf.  Return array of
-	logicals that define which tables are valid and join 
+	logicals that define which tables are valid and join
 	tables. */
 	table_list = check_tables(db,pf);
 	check_for_required_tables(table_list);
@@ -680,7 +682,7 @@ r
 	}
 
 	fp = fopen(outfile,"w");
-	if(fp == NULL) 
+	if(fp == NULL)
 	{
 		fprintf(stderr,"Cannot open output file %s\n",outfile);
 		usage();
@@ -690,7 +692,7 @@ r
 	pushtbl(sortkeys,"sta");
 	pushtbl(sortkeys,"chan");
 
-	/*The reel1 header in true blue segy is ebcdic.  We are goingto 
+	/*The reel1 header in true blue segy version 0 is ebcdic.  We are going to
 	just fill it with nulls and hope for the best */
 	for(i=0;i<3200;i++) reel1[i] = '\0';
 
@@ -703,8 +705,8 @@ r
 	numerical recipes routine found in libgenloc.  This is not
 	the most efficient way to do this, but it simplifies the
 	algorithm a lot. */
-	traces = matrix(0,nchan,0,nsamp0);
-	if(traces == NULL) 
+	traces = matrix(0, nchan, htonfp(0), nsamp0);
+	if(traces == NULL)
 		elog_die(0,"Cannot alloc trace data matrix work space of size %d by %d\n",
 			nchan, nsamp0);
 	header = (SegyHead *)calloc((size_t)nchan,sizeof(SegyHead));
@@ -714,36 +716,36 @@ r
 	{
 
 		/* now fill in the binary reel header and write it */
-		reel.kjob = 1;
-		reel.kline = 1;
-		reel.kreel = 1;
-		reel.kntr = (int16_t)nchan;
-		reel.knaux = 0;
-		reel.sr = (int16_t)(1000000.0/samprate0);
+		reel.kjob   = htonl(1);
+		reel.kline  = htonl(1);
+		reel.kreel  = htonl(1);
+		reel.kntr   = htons((int16_t)nchan);
+		reel.knaux  = htons(0);
+		reel.sr     = htons((int16_t)(1000000.0/samprate0));
 		reel.kfldsr = reel.sr;
 		reel.knsamp = (int16_t)nsamp0;
 		reel.kfsamp = (int16_t)nsamp0;
-		reel.dsfc=5;  /* This is ieee floats*/
-		reel.kmfold = 0;
+		reel.dsfc   = htons(5);  /* This is ieee floats*/
+		reel.kmfold = htons(0);
 		if(map_to_cdp)
-			reel.ksort = 2;
+			reel.ksort = htons(2);
 		else
-			reel.ksort = 1;
-		reel.kunits = 1;  /* This sets units to always be meters */
+			reel.ksort = htons(1);
+		reel.kunits = htons(1);  /* This sets units to always be meters */
 		for(i=0;i<344;++i)reel.unused2[i]='\0';
-	
-		if(fwrite((void *)(&reel),sizeof(SegyReel),1,fp) != 1) 
+
+		if(fwrite((void *)(&reel),sizeof(SegyReel),1,fp) != 1)
 		{
 			fprintf(stderr,"Write error for binary reel header\n");
 			exit(-2);
 		}
 	}
 
-	/* Now we enter a loop over stdin reading start times.  
-	Program will blindly ask for data from each start time to 
-	time+tlength.  The trace buffer will be initialized to 
+	/* Now we enter a loop over stdin reading start times.
+	Program will blindly ask for data from each start time to
+	time+tlength.  The trace buffer will be initialized to
 	zeros at the top of the loop always.  If nothing is found
-	only zeros will be written to output.  
+	only zeros will be written to output.
 	*/
 	while((stest=fgets(s,80,stdin)) != NULL)
 	{
@@ -753,20 +755,20 @@ r
 		for(i=0;i<nchan;++i)
 		{
 			initialize_header(&(header[i]));
-			header[i].lineSeq = total_traces + i + 1;
+			header[i].lineSeq = htonl(total_traces + i + 1);
 			header[i].reelSeq = header[i].lineSeq;
 			if(map_to_cdp)
 			{
-				header[i].cdpEns = i + 1;
-				header[i].traceInEnsemble = 1;  /* 1 trace per cdp faked */
+				header[i].cdpEns = htonl(i + 1);
+				header[i].traceInEnsemble = htonl(1);/* 1 trace per cdp faked */
 			}
 			else
 			{
-				header[i].channel_number = i + 1;
+				header[i].channel_number = htonl(i + 1);
 			}
-			header[i].event_number = shotid;
-			header[i].energySourcePt=shotid;
-			for(j=0;j<nsamp0;++j)  traces[i][j] = (Trsample)0.0;
+			header[i].event_number   = htonl(shotid);
+			header[i].energySourcePt = htonl(shotid);
+			for(j=0;j<nsamp0;++j)  traces[i][j] = htonfp((Trsample)0.0);
 		}
 		if(input_source_coordinates)
 		{
@@ -784,7 +786,7 @@ r
 		trdb.database = -1;
 		if(trload_css(dbj,stime,etime,&trdb,0, 0) < 0)
 		{
-			if(Verbose) 
+			if(Verbose)
 			{
 			  fprintf(stdout,"trload_css failed for shotid=%ld",shotid);
 			  fprintf(stdout,"  No data in time range %s to %s\n",
@@ -797,16 +799,15 @@ r
 		}
 		/* This does gap processing */
 		repair_gaps(trdb);
-		
+
 		trapply_calib(trdb);
-			
+
 		if(rotate)
 		{
 			if(rotate_to_standard(trdb,newchan_standard))
 				elog_notify(0,"Data loss in rotate_to_standard for event %s to %s\n",
 					stime, etime);
-			/* This is need to prevent collisions of channel 
-			names */
+			/* This is need to prevent collisions of channel names */
 			trdbss = dbsubset(trdb,trsubset,0);
 			if(trrotate(trdbss,phi,theta,newchan))
 				elog_notify(0,"Data loss in trrotate for event %s to %s\n",
@@ -844,7 +845,7 @@ r
 			/* Allow 1 percent samprate error before killing */
 			double fsrskew=fabs((samprate-samprate0)/samprate0);
 			double frskewcut=0.01;
-			if(fsrskew>frskewcut) 
+			if(fsrskew>frskewcut)
 			{
 				elog_complain(0,"%s:%s sample rate %f is significantly different from base sample rate of %f\nTrace skipped -- segy requires fixed sample rates\n",
 					sta,chan,samprate,samprate0);
@@ -867,100 +868,104 @@ r
 					ichan, nchan);
 			if(ichan >= 0)
 			{
-				if(Verbose) 
+				if(Verbose)
 				   fprintf(stdout,"%s:%s\t%-d\t%-d\t%-ld\t%-ld\n",
 					sta,chan,ichan+1,
-                                        header[ichan].reelSeq,
+					ntohl(header[ichan].reelSeq),
 					shotid, evid);
-				header[ichan].traceID = 1;
-				for(j=0;j<nsamp;++j) 
-				   traces[ichan][j] = (float)trdata[j];
+				header[ichan].traceID = htons(1);
+				for(j=0;j<nsamp;++j)
+				   traces[ichan][j] = htonfp((float)trdata[j]);
 				/* header fields coming from trace table */
-				header[ichan].samp_rate = (int32_t)
-						(1000000.0/samprate0);
+				header[ichan].samp_rate = htonl(
+						(int32_t) (1000000.0/samprate0));
 				if(!use_geo_coordinates && ( coordScale==1))
 				{
-				  header[ichan].recLongOrX = (int32_t)(deast*1000.0);
-				  header[ichan].recLatOrY = (int32_t)(dnorth*1000.0);
+				  header[ichan].recLongOrX = htonl((int32_t)(deast *1000.0));
+				  header[ichan].recLatOrY  = htonl((int32_t)(dnorth*1000.0));
 				}
 				else
 				{
 				/* Note negative here.  This is a oddity
 				of segy that - means divide by this to
-				get actual.  Always make this negative in case 
+				get actual.  Always make this negative in case
 				user inputs a negative number. */
-				  header[ichan].coordScale=-abs(coordScale);
+				  header[ichan].coordScale = htons(-abs(coordScale));
 				  /* Force 2 = geographic coordinates.  Standard says when this is
 				  so units are arc seconds, hence we multiply deg by 3600*coordScale */
 				  if(use_geo_coordinates)
 				  {
-				    header[ichan].coordUnits=2;
+				    header[ichan].coordUnits = htons(2);
 				    header[ichan].recLongOrX
-				     =(int32_t)(lon*3600.0*(double)coordScale);
+				     = htonl((int32_t)(lon*3600.0*(double)coordScale));
 				    header[ichan].recLatOrY
-				     =(int32_t)(lat*3600.0*(double)coordScale);
+				     = htonl((int32_t)(lat*3600.0*(double)coordScale));
 				  }
 				  else
 				  {
 				    header[ichan].recLongOrX
-				     =(int32_t)(lon*(double)coordScale);
+				     = htonl((int32_t)(lon*(double)coordScale));
 				    header[ichan].recLatOrY
-				     =(int32_t)(lat*(double)coordScale);
+				     = htonl((int32_t)(lat*(double)coordScale));
 				  }
 				}
-				header[ichan].recElevation = (int32_t)(elev*1000.0);
-				header[ichan].deltaSample = (int16_t) 
-						(1000000.0/samprate0);
-				header[ichan].sampleLength = (int16_t)nsamp0;
-				header[ichan].num_samps = (int32_t)nsamp0;
+				header[ichan].recElevation = htonl((int32_t)(elev*1000.0));
+				header[ichan].deltaSample = htons((int16_t)
+						(1000000.0/samprate0));
+				header[ichan].sampleLength = htons((int16_t)nsamp0);
+				header[ichan].num_samps = htonl((int32_t)nsamp0);
 				/* This cracks the time fields */
 				time_str = epoch2str(time0,fmt);
+				int16_t hyear, hday, hhour, hminute, hsecond, hm_secs;
+				hyear=hday=hhour=hminute=hsecond=hm_secs=0;
 				sscanf(time_str,"%hd %hd %hd %hd %hd %hd",
-					&header[ichan].year,
-					&header[ichan].day,
-					&header[ichan].hour,
-					&header[ichan].minute,
-					&header[ichan].second,
-					&header[ichan].m_secs);
+						&hyear, &hday, &hhour, &hminute, &hsecond, &hm_secs);
+				header[ichan].year   = htons(hyear);
+				header[ichan].day    = htons(hday);
+				header[ichan].hour   = htons(hhour);
+				header[ichan].minute = htons(hminute);
+				header[ichan].second = htons(hsecond);
+				header[ichan].m_secs = htons(m_secs);
 				/* These are PASSCAL extensions, but we'll
 				go ahead and set them anyway.*/
-				header[ichan].trigyear = header[ichan].year;
-				header[ichan].trigday = header[ichan].day;
-				header[ichan].trighour = header[ichan].hour;
+				header[ichan].trigyear   = header[ichan].year;
+				header[ichan].trigday    = header[ichan].day;
+				header[ichan].trighour   = header[ichan].hour;
 				header[ichan].trigminute = header[ichan].minute;
 				header[ichan].trigsecond = header[ichan].second;
 				free(time_str);
 				if(input_source_coordinates)
 				{
-				  if(use_geo_coordinates)
-				  {
-					slat*=3600.0;
-					slon*=3600.0;
-				  }
-				  header[ichan].sourceLongOrX
-				    =(int32_t)(slon*(double)coordScale);
-				  header[ichan].sourceLatOrY
-				    =(int32_t)(slat*(double)coordScale);
-				  header[ichan].sourceSurfaceElevation
-				             =(int32_t)selev;
-				  /* No easy way to specify both elev and depth*/
-				  header[ichan].sourceDepth=0;
+					if(use_geo_coordinates)
+					{
+						slat*=3600.0;
+						slon*=3600.0;
+					}
+					header[ichan].sourceLongOrX
+						=htonl((int32_t)(slon*(double)coordScale));
+					header[ichan].sourceLatOrY
+						=htonl((int32_t)(slat*(double)coordScale));
+					header[ichan].sourceSurfaceElevation
+						=htonl((int32_t)selev);
+					/* No easy way to specify both elev and depth*/
+					header[ichan].sourceDepth=htonl(0);
 				}
 				else if(map_to_cdp)
 				{
-				/* When faking CDP data we make this look 
+				/* When faking CDP data we make this look
 				like a zero offset, single fold data set */
-				  header[ichan].sourceLongOrX = header[ichan].recLongOrX;
-				  header[ichan].sourceLatOrY = header[ichan].recLatOrY;
-				  header[ichan].sourceSurfaceElevation = header[ichan].recElevation;
-				  header[ichan].sourceDepth = 0;
-				  header[ichan].sourceToRecDist = 0;
+					header[ichan].sourceLongOrX   = header[ichan].recLongOrX;
+					header[ichan].sourceLatOrY    = header[ichan].recLatOrY;
+					header[ichan].sourceSurfaceElevation
+					                              = header[ichan].recElevation;
+					header[ichan].sourceDepth     = htonl(0);
+					header[ichan].sourceToRecDist = htonl(0);
 				}
 				else
 				{
 				/* This is the mechanism for adding other
 				information with added tables.  The one
-				table currently supported is a "shot" table 
+				table currently supported is a "shot" table
 				that holds shot coordinates.  If other tables
 				were added new functions could be added with
 				a similar calling sequence.  This procedure
@@ -969,7 +974,7 @@ r
 					set_shot_variable(db,table_list,
 						evid,&header[ichan]);
 				}
-			}			
+			}
 			else
 			{
 				if(Verbose)
@@ -982,14 +987,14 @@ r
 		for(i=0;i<nchan;++i)
 		{
 			if(fwrite((void *)(&(header[i])),sizeof(SegyHead),1,fp) != 1)
-				elog_die(0,"Write error on header for trace %d\n",total_traces+i);		
+				elog_die(0,"Write error on header for trace %d\n",total_traces+i);
 			if(fwrite((void *)traces[i],sizeof(float),
 					(size_t)nsamp0,fp) != nsamp0)
 				elog_die(0,"Write error while writing data for trace %d\n",
 					total_traces+i);
 		}
 		total_traces += nchan;
-		trdestroy(&trdb);		
+		trdestroy(&trdb);
 		if(!input_source_coordinates) ++shotid;
 	}
 	return 0 ;
