@@ -723,8 +723,8 @@ r
 		reel.knaux  = htons(0);
 		reel.sr     = htons((int16_t)(1000000.0/samprate0));
 		reel.kfldsr = reel.sr;
-		reel.knsamp = (int16_t)nsamp0;
-		reel.kfsamp = (int16_t)nsamp0;
+		reel.knsamp = htons((int16_t)nsamp0);
+		reel.kfsamp = htons((int16_t)nsamp0);
 		reel.dsfc   = htons(5);  /* This is ieee floats*/
 		reel.kmfold = htons(0);
 		if(map_to_cdp)
@@ -732,6 +732,7 @@ r
 		else
 			reel.ksort = htons(1);
 		reel.kunits = htons(1);  /* This sets units to always be meters */
+		for(i=0;i<24;++i) reel.unused1[i]='\0';
 		for(i=0;i<344;++i)reel.unused2[i]='\0';
 
 		if(fwrite((void *)(&reel),sizeof(SegyReel),1,fp) != 1)
