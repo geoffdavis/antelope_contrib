@@ -106,7 +106,7 @@ initialize_header(SegyHead *header)
 	header->lowCutFreq = htons(0);
 	header->lowCutSlope = htons(0);
 	header->year = htons(0);
-	header->timeBasisCode = htons(0);  /* this means gmt time */
+	header->timeBasisCode = htons(2);  /* this means gmt time */
 	header->traceWeightingFactor = htons(0);
 	header->phoneRollPos1 = htons(0);
 	header->gapSize = htons(0);
