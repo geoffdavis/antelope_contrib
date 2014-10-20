@@ -55,41 +55,78 @@ Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables);
 void set_shot_variable(Dbptr db, Arr *tables, int evid, SEGYTraceHeader *h);
 void repair_gaps(Dbptr trdb);
 int16_t get_trace_id_code_from_segtype(char segtype);
-void initialize_text_header (char *out, int16_t segy_format);
+void initialize_text_header (char *out, int16_t segy_format, char *desc);
 
+/* Fill out the 3200-byte text header block. This block is organized into 40
+ * records of 80 character columns, with the first four characters of each
+ * line/record serving as record markers. The record numbers are in the format
+ * "CXX " where XX is a space padded two digit number.
+ *
+ * If the requested segy_format is not Rev 1 or greater, output all text in
+ * EBCDIC, translating any supplied ASCII text on the fly.
+ *
+ * The desc string is an optional 76 character string that will go in the first
+ * record (aka "C 1")
+ * If desc overflows 76 characters, it is truncated and a warning is sent to
+ * elog. */
 void
-initialize_text_header (char *out, int16_t segy_format)
+initialize_text_header (char *out, int16_t segy_format, char *desc)
 {
+	memset(out, '\0', SEGY_TEXT_HEADER_SIZE);
+
 	int ebcdic=1;
-	memset(out, '\0', 80*40);
+	/* If we're SEG-Y Rev1 or later, use ASCII */
+	if(ntohs(segy_format) >= 0x0100) {
+		ebcdic=0;
+	}
 
-	if(ntohs(segy_format) >= 0x0100) { ebcdic=0; }
-
-	for(int row=0; row < 40; row++)
+	/* Fill in the standard record headers */
+	for(int row=0; row < SEGY_TEXT_HEADER_RECORDS; row++)
 	{
-		snprintf(out+(row*80), 80, "C%2d ", row+1);
-	}
-	snprintf(out+(37*80), 80, "C38 OUTPUT BY: ANTELOPE DB2SEGY");
-	if (segy_format == SEGY_FORMAT_REV_1_0) {
-		snprintf(out+(38*80), 80, "C39 SEG Y REV1");
-	}
-	if (ebcdic) {
-		snprintf(out+(39*80), 80, "C40 END EBCDIC");
-	} else {
-		snprintf(out+(39*80), 80, "C40 END TEXTUAL HEADER");
+		snprintf(out + (row*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C%2d ", row+1);
 	}
 
-	if (ebcdic)
-	{
-		for(int row=0; row < 40; row++)
-		{
-			for (int col=0; col < 80; col++)
-			{
-				char *s = out + (row*col);
-				*s = a2e[(unsigned char)*s ];
-			}
+	int desclen=0;
+	if (desc){
+		desclen=strlen(desc);
+	}
+
+	if (desclen > 0) {
+		/* insert our description in record 1 */
+		elog_debug(0,"Got a description field: %s", desc);
+		if (desclen > SEGY_TEXT_HEADER_USABLE_COLUMNS) {
+			elog_complain(0,
+					"The description field overflows the allowed %d character limit by %d characters. Truncating.",
+					SEGY_TEXT_HEADER_USABLE_COLUMNS,
+					desclen - SEGY_TEXT_HEADER_USABLE_COLUMNS);
 		}
+		strncpy(out+4, desc, SEGY_TEXT_HEADER_USABLE_COLUMNS);
 	}
+
+	/* Insert our advertising clause */
+	snprintf( out + (37*SEGY_TEXT_HEADER_COLUMNS),
+			SEGY_TEXT_HEADER_COLUMNS, "C38 OUTPUT BY: ANTELOPE DB2SEGY");
+
+	/* Print out the mandatory SEG-Y Rev1 format marker */
+	if (segy_format == SEGY_FORMAT_REV_1_0) {
+		snprintf(out+(38*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C39 SEG Y REV1");
+	}
+	/* Print out the SEG-Y end blurb (Mandatory in Rev1) */
+	if (ebcdic) {
+		snprintf(out+(39*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C40 END EBCDIC");
+	} else {
+		snprintf(out+(39*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C40 END TEXTUAL HEADER");
+	}
+
+	/* Translate from ASCII to EBCDIC if necessary */
+	if (ebcdic) { for(int i=0; i < SEGY_TEXT_HEADER_SIZE; i++) {
+		char *s = out + i;
+		*s = a2e[(unsigned char)*s ];
+	} }
 }
 
 /* Map CSS3.0 segtype to one of the SEG-Y rev1 trace identification codes.
@@ -117,14 +154,14 @@ int16_t get_trace_id_code_from_segtype(char segtype)
 static void
 usage()
 {
-	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile [-SU|-V ver] -ss subset]\n");
+	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile [-SU|-V ver] -ss subset -d \"description\"]\n");
 	exit(-1);
 }
 
 void
 initialize_binary_file_header(SEGYBinaryFileHeader *reel, int16_t segy_format)
 {
-	assert( sizeof(SEGYBinaryFileHeader)==400 );
+	assert( sizeof(SEGYBinaryFileHeader)==SEGY_BINARY_HEADER_SIZE );
 	assert( segy_format == SEGY_FORMAT_REV_0 || \
 			segy_format == SEGY_FORMAT_REV_1_0 );
 	memset(reel, '\0', sizeof(SEGYBinaryFileHeader));
@@ -134,7 +171,7 @@ initialize_binary_file_header(SEGYBinaryFileHeader *reel, int16_t segy_format)
 void
 initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 {
-	assert( sizeof(SEGYTraceHeader)==240 );
+	assert( sizeof(SEGYTraceHeader)==SEGY_TRACE_HEADER_SIZE );
 	memset(header, '\0', sizeof(SEGYTraceHeader));
 	header->lineSeq = htonl(1);
 	header->event_number = htonl(1);
@@ -597,7 +634,7 @@ int main(int argc, char **argv)
 	char *stest;
 
 	float **traces;
-	char text_file_header[3200];
+	char text_file_header[SEGY_TEXT_HEADER_SIZE];
 	Dbptr db, trdb, dbj;
 	Dbptr trdbss;
 	int nsamp0;
@@ -645,7 +682,6 @@ int main(int argc, char **argv)
 	/* This is switched on by argument switch.  When set to a nonzero
 	(default) the reel headers are written.  When 0 `
 	the reel headers will not be written -- used by seismic unix
-r
 	and passcal*/
 	int write_reel_headers=1;
 
@@ -654,6 +690,12 @@ r
 
 	/* dbsubset query string */
 	char *substr=NULL;
+
+	/* text_header_description is a buffer holding a user-supplied description
+	 * to be placed in the 3200-byte text header block. It is controlled by
+	 * the parameter file value text_header_description or by the -d command
+	 * line option, with the latter taking precedence */
+	char* text_header_description=NULL;
 
 	if(argc < 3) usage();
 	dbin = argv[1];
@@ -673,6 +715,11 @@ r
 		else if(!strcmp(argv[i],"-v"))
 		{
 			Verbose=1;
+		}
+		else if(!strcmp(argv[i],"-d"))
+		{
+			++i;
+			text_header_description = strdup(argv[i]);
 		}
 		else if(!strcmp(argv[i],"-ss"))
 		{
@@ -709,8 +756,15 @@ r
 
 	elog_init(argc, argv);
 
-	if(pfread(pfname,&pf))
+	if(pfread(pfname,&pf)) {
 		elog_die(0,"pfread error for pf file %s.pf\n",argv[0]);
+	}
+
+	/* Read the text_header_description if we weren't passed the -d option */
+	if (!text_header_description) {
+		text_header_description=pfget_string(pf, "text_header_description");
+	}
+
 	/* rotation parameters */
 	rotate=pfget_boolean(pf,"rotate");
 	if(rotate)
@@ -747,7 +801,7 @@ r
 
 	/* nsamp in segy is a 16 bit field.  Handling depends on
 	setting of use_32bit_nsamp boolean */
-	if(nsamp0 > 32767)
+	if(nsamp0 > SEGY_MAX_NSAMP)
 	{
 		if(use_32bit_nsamp)
 		{
@@ -756,8 +810,8 @@ r
 		else
 		{
 		elog_complain(0,
-		  "Warning:  segy uses a 16 bit entity to store number of samples. Requested %d samples per trace.  Trucated to 32767",nsamp0);
-		nsamp0 = 32767;
+		  "Warning:  segy uses a 16 bit entity to store number of samples. Requested %d samples per trace.  Trucated to %d", nsamp0, SEGY_MAX_NSAMP);
+		nsamp0 = SEGY_MAX_NSAMP;
 		}
 	}
 	input_source_coordinates=pfget_boolean(pf,"input_source_coordinates");
@@ -813,11 +867,13 @@ r
 	pushtbl(sortkeys,"sta");
 	pushtbl(sortkeys,"chan");
 
-	initialize_text_header(text_file_header, segy_format);
+	initialize_text_header(text_file_header, segy_format,
+			text_header_description);
 
 	/* Just blindly write this turkey. Bad form, but tough*/
 	if(write_reel_headers){
-		if ( fwrite(text_file_header,1,3200,fp) != 3200 ) {
+		if ( fwrite(text_file_header,1,SEGY_TEXT_HEADER_SIZE,fp) \
+				!= SEGY_TEXT_HEADER_SIZE ) {
 			elog_die(1,"An error occurred writing the textual file header");
 		}
 	}

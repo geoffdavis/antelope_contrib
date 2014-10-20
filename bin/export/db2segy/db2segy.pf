@@ -103,11 +103,17 @@ use_32bit_nsamp false
 input_source_coordinates false
 coordinate_scale_factor 3600
 use_geo_coordinates true
+
+#
+# Additional features added in 2014
+#
+
 # trace_gain controls the value of the "gain type of field instruments" field
 # (bytes 119-120) in the trace header.
 # 0 = unknown; 1 = fixed gain; 2 = binary; 3 = floating point; 4...N optional
 # Default is 0 (unknown) to maintain compatiblity with previous versions
 # of this program.
 trace_gain_type 0
+text_header_description This is a test description field. It cuts off after 76 characters as shown here.
 
 pf_revision_time 1413768151

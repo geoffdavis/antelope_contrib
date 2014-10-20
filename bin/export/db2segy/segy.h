@@ -1,4 +1,9 @@
 #include <stdint.h>
+
+/* Strict SEG-Y uses a 16-bit signed int for the number of samples in a trace
+ * The Pavlis/PASSCAL extensions use a custom field to extend this to 32-bits */
+#define SEGY_MAX_NSAMP 32767
+
 /* This is the header for the segy trace header.  Reading bytes
   directly into this header will allow access to all of the fields.
 */
@@ -146,11 +151,11 @@ typedef struct SEGYTraceHeader {
   char extra[8];
   /* End Pavlis/PASSCAL non-standard extensions */
 } SEGYTraceHeader; /* end of segy trace header */
+#define SEGY_TRACE_HEADER_SIZE 240
 #define SEGY_TRACE_GAIN_UNKNOWN htons(0)
 #define SEGY_TRACE_GAIN_FIXED htons(1)
 #define SEGY_TRACE_GAIN_BINARY htons(2)
 #define SEGY_TRACE_GAIN_FP htons(3)
-
 
 /* The 400-byte Binary File Header from the SEG-Y rev 1 spec
  * This header starts at byte 3201 and continues to byte 3600
@@ -328,10 +333,16 @@ typedef struct SEGYBinaryFileHeader{
     /* End SEG-Y rev0unused2
      ********/
 } SEGYBinaryFileHeader;
+#define SEGY_BINARY_HEADER_SIZE 400
 
 #define SEGY_FORMAT_SU -1
 #define SEGY_FORMAT_REV_0 htons(0x0000)
 #define SEGY_FORMAT_REV_1_0 htons(0x0100)
+
+#define SEGY_TEXT_HEADER_RECORDS 40
+#define SEGY_TEXT_HEADER_COLUMNS 80
+#define SEGY_TEXT_HEADER_SIZE 3200 //RECORDS * COLUMNS
+#define SEGY_TEXT_HEADER_USABLE_COLUMNS 76
 
 static const unsigned char a2e[256] = {
       0,  1,  2,  3, 55, 45, 46, 47, 22,  5, 37, 11, 12, 13, 14, 15,
