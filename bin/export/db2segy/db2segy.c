@@ -29,6 +29,7 @@ that recycled some of the original code written in February 1999.
 */
 #include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
 #include "stock.h"
 #include "coords.h"
 #include "db.h"
@@ -43,26 +44,98 @@ that recycled some of the original code written in February 1999.
 /* Newer compilers will complain if these prototypes are not defined.
 Could be placed in segy.y, but that would strike me as mysterious. */
 
-void initialize_header(SegyHead *header);
+void initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format);
+void initialize_binary_file_header(SEGYBinaryFileHeader *reel, int16_t segy_format);
 char *make_key(char *s, char *c);
 Arr *build_stachan_list(Pf *pf, int *nchan,int verbose);
 int get_channel_index(Arr *a, char *sta, char *chan);
 Arr *check_tables(Dbptr db, Pf *pf);
 void check_for_required_tables(Arr *tabarray);
 Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables);
-void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h);
+void set_shot_variable(Dbptr db, Arr *tables, int evid, SEGYTraceHeader *h);
 void repair_gaps(Dbptr trdb);
+int16_t get_trace_id_code_from_segtype(char segtype);
+void initialize_text_header (char *out, int16_t segy_format);
+
+void
+initialize_text_header (char *out, int16_t segy_format)
+{
+	int ebcdic=1;
+	memset(out, '\0', 80*40);
+
+	if(ntohs(segy_format) >= 0x0100) { ebcdic=0; }
+
+	for(int row=0; row < 40; row++)
+	{
+		snprintf(out+(row*80), 80, "C%2d ", row+1);
+	}
+	snprintf(out+(37*80), 80, "C38 OUTPUT BY: ANTELOPE DB2SEGY");
+	if (segy_format == SEGY_FORMAT_REV_1_0) {
+		snprintf(out+(38*80), 80, "C39 SEG Y REV1");
+	}
+	if (ebcdic) {
+		snprintf(out+(39*80), 80, "C40 END EBCDIC");
+	} else {
+		snprintf(out+(39*80), 80, "C40 END TEXTUAL HEADER");
+	}
+
+	if (ebcdic)
+	{
+		for(int row=0; row < 40; row++)
+		{
+			for (int col=0; col < 80; col++)
+			{
+				char *s = out + (row*col);
+				*s = a2e[(unsigned char)*s ];
+			}
+		}
+	}
+}
+
+/* Map CSS3.0 segtype to one of the SEG-Y rev1 trace identification codes.
+ * At this point we're going to assume 1 (seismic) for types A or V,
+ * -1 (Other) for a few known types,
+ * and 0 (Unknown) otherwise */
+int16_t get_trace_id_code_from_segtype(char segtype)
+{
+	switch(segtype)
+	{
+		case 'A':
+		case 'V':
+		case 'D':
+			return htons(1);
+			break;
+		case 'I':
+			return htons((int16_t)-1);
+			break;
+		default:
+			return 0;
+	}
+	return 0;
+}
 
 static void
 usage()
 {
-	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile -SU -ss subset -v]\n");
+	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile [-SU|-V ver] -ss subset]\n");
 	exit(-1);
 }
 
 void
-initialize_header(SegyHead *header)
+initialize_binary_file_header(SEGYBinaryFileHeader *reel, int16_t segy_format)
 {
+	assert( sizeof(SEGYBinaryFileHeader)==400 );
+	assert( segy_format == SEGY_FORMAT_REV_0 || \
+			segy_format == SEGY_FORMAT_REV_1_0 );
+	memset(reel, '\0', sizeof(SEGYBinaryFileHeader));
+	reel->segy_format = segy_format;
+}
+
+void
+initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
+{
+	assert( sizeof(SEGYTraceHeader)==240 );
+	memset(header, '\0', sizeof(SEGYTraceHeader));
 	header->lineSeq = htonl(1);
 	header->event_number = htonl(1);
 	header->channel_number = htonl(1);
@@ -93,7 +166,7 @@ initialize_header(SegyHead *header)
 	header->muteStart = htons(0);
 	header->sampleLength = htons(0);
 	header->deltaSample = htons(0);
-	header->gainType = htons(0);
+	header->gainType = SEGY_TRACE_GAIN_UNKNOWN;
 	header->gainConst = htons(0);
 	header->correlated = htons(0);
 	header->sweepStart = htons(0);
@@ -113,19 +186,23 @@ initialize_header(SegyHead *header)
 	header->taperOvertravel = htons(0);
 	header->extrash[10] = htons(0);
 	header->samp_rate = htonl(0);
-	/* Always ieee floats in this program for now */
-	header->data_form  = htons(5);
-	header->trigyear   = htons(0);
-	header->trigday    = htons(0);
-	header->trighour   = htons(0);
-	header->trigminute = htons(0);
-	header->trigsecond = htons(0);
-	header->trigmills  = htons(0);
-	header->scale_fac = htonf(0);
-	header->inst_no = htons(0);
-	header->not_to_be_used = htons(0);
-	header->num_samps = htonl(0);
-	header->extra[8] = 0;
+	/* Begin Pavlis/PASSCAL non-standard extensions */
+	if (ntohs(segy_format)<0x0100) {
+		/* Always ieee floats in this program for now */
+		header->data_form  = htons(5);
+		header->trigyear   = htons(0);
+		header->trigday    = htons(0);
+		header->trighour   = htons(0);
+		header->trigminute = htons(0);
+		header->trigsecond = htons(0);
+		header->trigmills  = htons(0);
+		header->scale_fac = htonf(0);
+		header->inst_no = htons(0);
+		header->not_to_be_used = htons(0);
+		header->num_samps = htonl(0);
+		header->extra[8] = 0;
+	}
+	/* End Pavlis non-standard extension */
 	header->reelSeq = htonl(1);
 	header->horSum = htons(0);
 	header->datumElemSource = htonl(0);
@@ -179,7 +256,7 @@ Arr *build_stachan_list(Pf *pf, int *nchan,int verbose)
 	int *channel_number;  /* value stored in arr */
 
 	if(verbose)
-		fprintf(stdout,"Station   Channel_code    Channel_number\n");
+		elog_notify(0,"Station   Channel_code    Channel_number\n");
 	a = newarr(0);
 	t = pfget_tbl(pf,"channels");
 	if(t==NULL) elog_die(0,"Parameter file error:  no channels table\n");
@@ -194,7 +271,7 @@ Arr *build_stachan_list(Pf *pf, int *nchan,int verbose)
 		*channel_number = i;
 		setarr(a,key,(void *)channel_number);
 		if(verbose)
-			fprintf(stdout,"%s  %s  %d\n",sta,chan,(*channel_number)+1);
+			elog_notify(0,"%s  %s  %d\n",sta,chan,(*channel_number)+1);
 		free(key);
 	}
 	*nchan = maxtbl(t);
@@ -363,7 +440,7 @@ Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables)
 
 
 
-void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h)
+void set_shot_variable(Dbptr db, Arr *tables, int evid, SEGYTraceHeader *h)
 {
 	int *ok;
 	char ss_string[30];
@@ -508,8 +585,8 @@ void repair_gaps(Dbptr trdb)
 
 int main(int argc, char **argv)
 {
-	SegyReel reel;
-	SegyHead *header;
+	SEGYBinaryFileHeader reel;
+	SEGYTraceHeader *header;
 	char *dbin;
 	char *outfile;
 	FILE *fp;
@@ -520,7 +597,7 @@ int main(int argc, char **argv)
 	char *stest;
 
 	float **traces;
-	char reel1[3200];
+	char text_file_header[3200];
 	Dbptr db, trdb, dbj;
 	Dbptr trdbss;
 	int nsamp0;
@@ -538,6 +615,7 @@ int main(int argc, char **argv)
 	Tbl *sortkeys=newtbl(0);
 	char sta[10],chan[10];
 	double lat, lon, elev, dnorth, deast, edepth;
+	char segtype;
 	char refsta[10];
 	int total_traces=0;
 	char *time_str;
@@ -566,10 +644,15 @@ int main(int argc, char **argv)
 	int use_32bit_nsamp;
 	/* This is switched on by argument switch.  When set to a nonzero
 	(default) the reel headers are written.  When 0 `
-	the reel heades will not be written -- used by seismic unix
+	the reel headers will not be written -- used by seismic unix
 r
 	and passcal*/
 	int write_reel_headers=1;
+
+	/* SEG-Y version to output. Default is original 1975 spec (rev 0) */
+	int16_t segy_format = SEGY_FORMAT_REV_0;
+
+	/* dbsubset query string */
 	char *substr=NULL;
 
 	if(argc < 3) usage();
@@ -596,10 +679,31 @@ r
 			++i;
 			substr=argv[i];
 		}
+		else if(!strcmp(argv[i],"-V"))
+		{
+			++i;
+			if     (!strcmp(argv[i],"0")) {segy_format = SEGY_FORMAT_REV_0;}
+			else if(!strcmp(argv[i],"1")) {segy_format = SEGY_FORMAT_REV_1_0;}
+			else if(!strcmp(argv[i],"SU"))
+			{
+				segy_format = SEGY_FORMAT_SU;
+				write_reel_headers=0;
+			}
+			else
+			{
+				elog_complain(0, "SEG-Y Version must be either 1 or 0");
+				usage();
+			}
+		}
 		else
 		{
 			usage();
 		}
+	}
+	/* Parameter sanity checking */
+	if (write_reel_headers==0 && segy_format != SEGY_FORMAT_SU){
+		complain(0, "The SU option cannot be used with the -V option");
+		usage();
 	}
 	if(pfname == NULL) pfname = strdup("db2segy");
 
@@ -620,10 +724,10 @@ r
 
 	map_to_cdp = pfget_boolean(pf,"map_to_cdp");
 	if(map_to_cdp && Verbose)
-		fprintf(stdout,"Casting data as CDP stacked section\n");
+		elog_notify(0,"Casting data as CDP stacked section\n");
 	if(dbopen(dbin,"r",&db) == dbINVALID)
 	{
-		fprintf(stderr,"Cannot open db %s\n", dbin);
+		elog_complain(1,"Cannot open db %s\n", dbin);
 		usage();
 	}
 	/* We grab the sample rate and trace length (in seconds) and
@@ -636,21 +740,25 @@ r
 	tlength = pfget_double(pf,"trace_length");
 	nsamp0 = (int)(tlength*samprate0);
 	use_32bit_nsamp=pfget_boolean(pf,"use_32bit_nsamp");
+	if (ntohs(segy_format) >= 0x0100) {
+		elog_complain(0,"The 32-bit extension field is incompatible with SEG-Y REV 1. Ignoring 'use_32bit_nsamp' from the parameter file");
+		use_32bit_nsamp=0;
+	}
 
 	/* nsamp in segy is a 16 bit field.  Handling depends on
 	setting of use_32bit_nsamp boolean */
 	if(nsamp0 > 32767)
 	{
-	    if(use_32bit_nsamp)
-	    {
-	    	elog_notify(0,"Warning:  segy ues a 16 bit entity to store number of samples\nThat field is garbage. Using the 32 bit extension field.\n");
-	    }
-	    else
-	    {
+		if(use_32bit_nsamp)
+		{
+			elog_notify(0,"Warning:  segy uses a 16 bit entity to store number of samples\nThat field is garbage. Using the 32 bit extension field.");
+		}
+		else
+		{
 		elog_complain(0,
-		  "Warning:  segy uses a 16 bit entity to store number of samples\nRequested %d samples per trace.  Trucated to 32767\n",nsamp0);
+		  "Warning:  segy uses a 16 bit entity to store number of samples. Requested %d samples per trace.  Trucated to 32767",nsamp0);
 		nsamp0 = 32767;
-	    }
+		}
 	}
 	input_source_coordinates=pfget_boolean(pf,"input_source_coordinates");
 	if(input_source_coordinates)
@@ -663,6 +771,19 @@ r
 	}
 	/* boolean.  When nonzero set coordinates as geographic arc seconds values */
 	int use_geo_coordinates=pfget_boolean(pf,"use_geo_coordinates");
+
+	/* trace_gain_type: signed int */
+	int16_t trace_gain_type = pfget_int(pf,"trace_gain_type");
+	if (trace_gain_type < 0)
+	{
+		die(0, "The trace_gain_type must be zero or greater");
+	}
+	else
+	{
+		trace_gain_type=htons(trace_gain_type);
+	}
+
+
 	/* check list of tables defined in pf.  Return array of
 	logicals that define which tables are valid and join
 	tables. */
@@ -675,8 +796,8 @@ r
 	dbquery(dbj,dbRECORD_COUNT,&ndbrows);
 	if(ndbrows<=0)
 	{
-		fprintf(stderr,"Working database view is empty\n");
-		if(substr!=NULL) fprintf(stderr,"Subset condtion =%s a likely problem\n",
+		elog_complain(1,"Working database view is empty\n");
+		if(substr!=NULL) elog_complain(0,"Subset condtion =%s a likely problem\n",
 				substr);
 		usage();
 	}
@@ -684,7 +805,7 @@ r
 	fp = fopen(outfile,"w");
 	if(fp == NULL)
 	{
-		fprintf(stderr,"Cannot open output file %s\n",outfile);
+		elog_complain(0,"Cannot open output file %s\n",outfile);
 		usage();
 	}
 
@@ -692,12 +813,14 @@ r
 	pushtbl(sortkeys,"sta");
 	pushtbl(sortkeys,"chan");
 
-	/*The reel1 header in true blue segy version 0 is ebcdic.  We are going to
-	just fill it with nulls and hope for the best */
-	for(i=0;i<3200;i++) reel1[i] = '\0';
+	initialize_text_header(text_file_header, segy_format);
 
 	/* Just blindly write this turkey. Bad form, but tough*/
-	if(write_reel_headers) fwrite(reel1,1,3200,fp);
+	if(write_reel_headers){
+		if ( fwrite(text_file_header,1,3200,fp) != 3200 ) {
+			elog_die(1,"An error occurred writing the textual file header");
+		}
+	}
 
 	/* memory allocation for trace data.  This is a large matrix
 	that is cleared for each event.  This model works because of
@@ -709,11 +832,15 @@ r
 	if(traces == NULL)
 		elog_die(0,"Cannot alloc trace data matrix work space of size %d by %d\n",
 			nchan, nsamp0);
-	header = (SegyHead *)calloc((size_t)nchan,sizeof(SegyHead));
+	header = (SEGYTraceHeader *)calloc((size_t)nchan,sizeof(SEGYTraceHeader));
 	if(header == NULL)
 			elog_die(0,"Cannot alloc memory for %d segy header workspace\n",nchan);
 	if(write_reel_headers)
 	{
+		if (Verbose) {
+			elog_debug(0,"Binary Headers - Using segy_format code 0x%04X\n", ntohs(segy_format));
+		}
+		initialize_binary_file_header(&reel, segy_format);
 
 		/* now fill in the binary reel header and write it */
 		reel.kjob   = htonl(1);
@@ -732,13 +859,10 @@ r
 		else
 			reel.ksort = htons(1);
 		reel.kunits = htons(1);  /* This sets units to always be meters */
-		for(i=0;i<24;++i) reel.unused1[i]='\0';
-		for(i=0;i<344;++i)reel.unused2[i]='\0';
 
-		if(fwrite((void *)(&reel),sizeof(SegyReel),1,fp) != 1)
+		if(fwrite((void *)(&reel),sizeof(SEGYBinaryFileHeader),1,fp) != 1)
 		{
-			fprintf(stderr,"Write error for binary reel header\n");
-			exit(-2);
+			elog_die(1,"Write error for binary reel header");
 		}
 	}
 
@@ -752,10 +876,11 @@ r
 	{
 		double slat,slon,selev;  /* Used when reading source location*/
 		if(Verbose)
-			fprintf(stdout,"Processing:  %s\n",s);
+			elog_notify(0,"Processing:  %s\n",s);
 		for(i=0;i<nchan;++i)
 		{
-			initialize_header(&(header[i]));
+			initialize_trace_header(&(header[i]), segy_format);
+			header[i].gainType = trace_gain_type;
 			header[i].lineSeq = htonl(total_traces + i + 1);
 			header[i].reelSeq = header[i].lineSeq;
 			if(map_to_cdp)
@@ -789,11 +914,11 @@ r
 		{
 			if(Verbose)
 			{
-			  fprintf(stdout,"trload_css failed for shotid=%ld",shotid);
-			  fprintf(stdout,"  No data in time range %s to %s\n",
+			  elog_notify(0,"trload_css failed for shotid=%ld",shotid);
+			  elog_notify(0,"  No data in time range %s to %s\n",
 			  	strtime(time0),strtime(endtime0) );
-			  fprintf(stdout,"No data written for this shotid block.");
-			  fprintf(stdout,"  Handle this carefully in geometry definitions.\n");
+			  elog_notify(0,"No data written for this shotid block.");
+			  elog_notify(0,"  Handle this carefully in geometry definitions.\n");
 			}
 
 			continue;
@@ -815,10 +940,10 @@ r
 					stime, etime);
 		}
 		if(Verbose)
-			fprintf(stdout,"Station  chan_name  chan_number seq_number shotid  evid\n");
+			elog_notify(0,"Station  chan_name  chan_number seq_number shotid  evid\n");
 		trdb = dbsort(trdb,sortkeys,0,0);
 		dbquery(trdb,dbRECORD_COUNT,&ntraces);
-		if(Verbose) fprintf(stdout,"Read %ld traces for event at time%s\n",
+		if(Verbose) elog_debug(0,"Read %ld traces for event at time%s\n",
 			ntraces,strtime(time0));
 		for(trdb.record=0;trdb.record<ntraces;++trdb.record)
 		{
@@ -837,7 +962,8 @@ r
 			    "dnorth",&dnorth,
 			    "deast",&deast,
 			    "edepth",&edepth,
-					NULL) == dbINVALID)
+			    "segtype",&segtype,
+			    NULL) == dbINVALID)
 			{
 				elog_complain(0," dbgetv error reading record %ld\nTrace will be skipped for station %s and channel %s\n",
 				trdb.record,sta,chan);
@@ -854,27 +980,27 @@ r
 			}
 			if(nsamp > nsamp0)
 			{
-				elog_complain(0,"%s:%s trace has extra samples=%ld\nTruncated to length %d\n",
+				elog_complain(0,"%s:%s trace has extra samples=%ld. Truncated to length %d\n",
 					sta, chan, nsamp, nsamp0);
 				nsamp = nsamp0;
 			}
 			else if(nsamp < nsamp0)
 			{
-				elog_complain(0,"%s:%s trace is shorter than expected %d samples\nZero padded after sample %ld\n",
+				elog_complain(0,"%s:%s trace is shorter than expected %d samples. Zero padded after sample %ld\n",
 					sta, chan, nsamp0, nsamp);
 			}
 
 			ichan = get_channel_index(channels,sta,chan);
-			if(ichan > nchan) elog_die(0,"Channel index %d outside limit of %d\nCannot continue\n",
+			if(ichan > nchan) elog_die(0,"Channel index %d outside limit of %d. Cannot continue\n",
 					ichan, nchan);
 			if(ichan >= 0)
 			{
 				if(Verbose)
-				   fprintf(stdout,"%s:%s\t%-d\t%-d\t%-ld\t%-ld\n",
+				   elog_debug(0,"%s:%s\t%-d\t%-d\t%-ld\t%-ld\n",
 					sta,chan,ichan+1,
 					ntohl(header[ichan].reelSeq),
 					shotid, evid);
-				header[ichan].traceID = htons(1);
+				header[ichan].traceID = get_trace_id_code_from_segtype(segtype);
 				for(j=0;j<nsamp;++j)
 				   traces[ichan][j] = htonf((float)trdata[j]);
 				/* header fields coming from trace table */
@@ -914,7 +1040,9 @@ r
 				header[ichan].deltaSample = htons((int16_t)
 						(1000000.0/samprate0));
 				header[ichan].sampleLength = htons((int16_t)nsamp0);
-				header[ichan].num_samps = htonl((int32_t)nsamp0);
+				if (ntohs(segy_format)<0x0100) {
+					header[ichan].num_samps = htonl((int32_t)nsamp0);
+				}
 				/* This cracks the time fields */
 				time_str = epoch2str(time0,fmt);
 				int16_t hyear, hday, hhour, hminute, hsecond, hm_secs;
@@ -927,13 +1055,14 @@ r
 				header[ichan].minute = htons(hminute);
 				header[ichan].second = htons(hsecond);
 				header[ichan].m_secs = htons(hm_secs);
-				/* These are PASSCAL extensions, but we'll
-				go ahead and set them anyway.*/
-				header[ichan].trigyear   = header[ichan].year;
-				header[ichan].trigday    = header[ichan].day;
-				header[ichan].trighour   = header[ichan].hour;
-				header[ichan].trigminute = header[ichan].minute;
-				header[ichan].trigsecond = header[ichan].second;
+				if (ntohs(segy_format)<0x0100) {
+					/* These are PASSCAL extensions */
+					header[ichan].trigyear   = header[ichan].year;
+					header[ichan].trigday    = header[ichan].day;
+					header[ichan].trighour   = header[ichan].hour;
+					header[ichan].trigminute = header[ichan].minute;
+					header[ichan].trigsecond = header[ichan].second;
+				}
 				free(time_str);
 				if(input_source_coordinates)
 				{
@@ -979,7 +1108,7 @@ r
 			else
 			{
 				if(Verbose)
-					fprintf(stdout,"Station %s and channel %s skipped\n",
+					elog_notify(0,"Station %s and channel %s skipped\n",
 						sta,chan);
 			}
 
@@ -987,7 +1116,7 @@ r
 		/* Now we write the data */
 		for(i=0;i<nchan;++i)
 		{
-			if(fwrite((void *)(&(header[i])),sizeof(SegyHead),1,fp) != 1)
+			if(fwrite((void *)(&(header[i])),sizeof(SEGYTraceHeader),1,fp) != 1)
 				elog_die(0,"Write error on header for trace %d\n",total_traces+i);
 			if(fwrite((void *)traces[i],sizeof(float),
 					(size_t)nsamp0,fp) != nsamp0)

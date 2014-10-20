@@ -5,10 +5,10 @@ rotate yes
 # This set of parameters are only hit when rotate is turned on.
 phi 80.0
 theta 0.0
-# end rotate parameters 
+# end rotate parameters
 
 #
-#  This is the pattern to use normal channel codes.  
+#  This is the pattern to use normal channel codes.
 #  They are commented out for this example.
 #
 #channels &Tbl{
@@ -103,3 +103,9 @@ use_32bit_nsamp false
 input_source_coordinates false
 coordinate_scale_factor 3600
 use_geo_coordinates true
+# trace_gain controls the value of the "gain type of field instruments" field
+# (bytes 119-120) in the trace header.
+# 0 = unknown; 1 = fixed gain; 2 = binary; 3 = floating point; 4...N optional
+# Default is 0 (unknown) to maintain compatiblity with previous versions
+# of this program.
+trace_gain_type 0
