@@ -1,7 +1,8 @@
 #include <stdint.h>
 
 /* Strict SEG-Y uses a 16-bit signed int for the number of samples in a trace
- * The Pavlis/PASSCAL extensions use a custom field to extend this to 32-bits */
+ * The Pavlis/IRIS-PASSCAL extensions use a custom field to extend this to
+ * 32-bits */
 #define SEGY_MAX_NSAMP 32767
 
 /* This is the header for the segy trace header.  Reading bytes
@@ -133,7 +134,7 @@ typedef struct SEGYTraceHeader {
   int16_t phoneLastTrace;   /* 175-176 */
   int16_t gapSize;          /* 177-178 */
   int16_t taperOvertravel;  /* 179-180 */
-  /* Begin Pavlis/PASSCAL non-standard extensions to SEG-Y Rev 0 */
+  /* Begin Pavlis/IRIS-PASSCAL non-standard extensions to SEG-Y Rev 0 */
   int16_t extrash[10];      /* 181-200 */
   int32_t samp_rate;        /* 201-204 Gary Pavlis non-standard extension */
   int16_t data_form;
@@ -149,7 +150,7 @@ typedef struct SEGYTraceHeader {
   int16_t not_to_be_used;
   int32_t num_samps;
   char extra[8];
-  /* End Pavlis/PASSCAL non-standard extensions */
+  /* End Pavlis/IRIS-PASSCAL non-standard extensions */
 } SEGYTraceHeader; /* end of segy trace header */
 #define SEGY_TRACE_HEADER_SIZE 240
 #define SEGY_TRACE_GAIN_UNKNOWN htons(0)

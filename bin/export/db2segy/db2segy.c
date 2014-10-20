@@ -22,9 +22,10 @@ The record length is defined in the parameter file.  The sample rate
 needs to be defined in the parameter file also.  Any deviations from
 that sample rate will cause the program to die.
 
-Author:  Gary L. Pavlis
+Authors:  Gary L. Pavlis and Geoffrey A Davis
 Written:  November 1998 in a hack form.  This version is a descendent
 that recycled some of the original code written in February 1999.
+Updated: 2014 with SEGY Rev1 compatibility
 
 */
 #include <stdlib.h>
@@ -154,7 +155,7 @@ int16_t get_trace_id_code_from_segtype(char segtype)
 static void
 usage()
 {
-	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile [-SU|-V ver] -ss subset -d \"description\"]\n");
+	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile [-SU|-V SU|-V 0|-V 1] -ss subset -d \"description\"]\n");
 	exit(-1);
 }
 
@@ -223,7 +224,7 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 	header->taperOvertravel = htons(0);
 	header->extrash[10] = htons(0);
 	header->samp_rate = htonl(0);
-	/* Begin Pavlis/PASSCAL non-standard extensions */
+	/* Begin Pavlis/IRIS-PASSCAL non-standard extensions */
 	if (ntohs(segy_format)<0x0100) {
 		/* Always ieee floats in this program for now */
 		header->data_form  = htons(5);
@@ -1112,7 +1113,7 @@ int main(int argc, char **argv)
 				header[ichan].second = htons(hsecond);
 				header[ichan].m_secs = htons(hm_secs);
 				if (ntohs(segy_format)<0x0100) {
-					/* These are PASSCAL extensions */
+					/* These are IRIS-PASSCAL extensions */
 					header[ichan].trigyear   = header[ichan].year;
 					header[ichan].trigday    = header[ichan].day;
 					header[ichan].trighour   = header[ichan].hour;

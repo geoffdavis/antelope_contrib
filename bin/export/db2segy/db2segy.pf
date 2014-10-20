@@ -112,8 +112,8 @@ use_geo_coordinates true
 # (bytes 119-120) in the trace header.
 # 0 = unknown; 1 = fixed gain; 2 = binary; 3 = floating point; 4...N optional
 # Default is 0 (unknown) to maintain compatiblity with previous versions
-# of this program.
+# of this program. 1 is probably a more sensible default.
 trace_gain_type 0
-text_header_description This is a test description field. It cuts off after 76 characters as shown here.
+text_header_description Antelope DB2SEGY
 
 pf_revision_time 1413768151
