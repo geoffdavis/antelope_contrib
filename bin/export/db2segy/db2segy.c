@@ -165,8 +165,13 @@ initialize_binary_file_header(SEGYBinaryFileHeader *reel, int16_t segy_format)
 	assert( sizeof(SEGYBinaryFileHeader)==SEGY_BINARY_HEADER_SIZE );
 	assert( segy_format == SEGY_FORMAT_REV_0 || \
 			segy_format == SEGY_FORMAT_REV_1_0 );
+
 	memset(reel, '\0', sizeof(SEGYBinaryFileHeader));
 	reel->segy_format = segy_format;
+
+    /* This is technically REV1 only, but the field was part of a large
+     * unused block in the original version of this program. */
+    reel->fixed_length_trace_flag = SEGY_TRLEN_FIXED;
 }
 
 void
@@ -793,7 +798,7 @@ int main(int argc, char **argv)
 	}
 	/* We grab the sample rate and trace length (in seconds) and
 	use this to define global sample rates for the data.
-	segy REQUIRES fixed length records and sample rates, so
+	SEG-Y REV0 REQUIRES fixed length records and sample rates, so
 	irregular sample rates will cause this program to die.
 	One could add a decimate/interpolate function, but this
 	is not currently implemented */
