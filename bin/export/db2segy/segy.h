@@ -127,7 +127,8 @@ typedef struct SEGYTraceHeader {
   int16_t minute;           /* 163-164 */
   int16_t second;           /* 165-166 */
   int16_t timeBasisCode;    /* 167-168 Time basis code: 1 = Local; 2 = GMT;
-                               3 = Other; 4 = UTC */
+                               3 = Other; 4 = UTC Note: "classic" SEGY defines
+                               only 1,2, and 3. UTC support added in REV1 */
   int16_t traceWeightingFactor; /* 169-170 */
   int16_t phoneRollPos1;    /* 171-172 */
   int16_t phoneFirstTrace;  /* 173-174 */
@@ -153,6 +154,15 @@ typedef struct SEGYTraceHeader {
   /* End Pavlis/IRIS-PASSCAL non-standard extensions */
 } SEGYTraceHeader; /* end of segy trace header */
 #define SEGY_TRACE_HEADER_SIZE 240
+
+/* Values for the timeBasisCode in the Trace Header Blocks (bytes 167-168) */
+#define SEGY_TRACE_TIMEBASIS_UNKNOWN htons(0)
+#define SEGY_TRACE_TIMEBASIS_LOCAL htons(1)
+#define SEGY_TRACE_TIMEBASIS_GMT htons(2)
+#define SEGY_TRACE_TIMEBASIS_OTHER htons(3)
+#define SEGY_TRACE_TIMEBASIS_UTC htons(4)
+
+/* Values for the Gain type in the trace header (bytes 119-120) */
 #define SEGY_TRACE_GAIN_UNKNOWN htons(0)
 #define SEGY_TRACE_GAIN_FIXED htons(1)
 #define SEGY_TRACE_GAIN_BINARY htons(2)

@@ -217,7 +217,13 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 	header->lowCutFreq = htons(0);
 	header->lowCutSlope = htons(0);
 	header->year = htons(0);
-	header->timeBasisCode = htons(2);  /* this means gmt time */
+    /* SEG-Y "classic" supports only time basis codes 0-3. Antelope records
+     * in UTC (which has leap second corrections). */
+    if (ntohs(segy_format)>=0x0100) {
+        header->timeBasisCode = SEGY_TRACE_TIMEBASIS_UTC;
+    } else {
+        header->timeBasisCode = SEGY_TRACE_TIMEBASIC_GMT;
+    }
 	header->traceWeightingFactor = htons(0);
 	header->phoneRollPos1 = htons(0);
 	header->gapSize = htons(0);
