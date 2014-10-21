@@ -325,7 +325,7 @@ typedef struct SEGYBinaryFileHeader{
     int16_t fixed_length_trace_flag;
     /* 3505-3506 Number of 3200-byte Extended Textual File HEader records
      * following the Binary Header. A value of zero indicates there are no
-     * Extended Textual FIle HEader records (i.e. this file has no Extended
+     * Extended Textual File Header records (i.e. this file has no Extended
      * Textual File Header(s)). A value of -1 indicates that there are a
      * variable number of Extended Textual File Header records and the end of
      * the Extended Textual FIle Header is denoted by an ((SEG: EndText))
@@ -349,6 +349,11 @@ typedef struct SEGYBinaryFileHeader{
 #define SEGY_FORMAT_SU -1
 #define SEGY_FORMAT_REV_0 htons(0x0000)
 #define SEGY_FORMAT_REV_1_0 htons(0x0100)
+
+/* Fixed length trace flag */
+#define SEGY_TRLEN_FIXED htons(1)
+#define SEGY_TRLEN_VARIABLE htons(0)
+
 
 #define SEGY_TEXT_HEADER_RECORDS 40
 #define SEGY_TEXT_HEADER_COLUMNS 80

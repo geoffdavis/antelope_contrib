@@ -227,7 +227,7 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
     if (ntohs(segy_format)>=0x0100) {
         header->timeBasisCode = SEGY_TRACE_TIMEBASIS_UTC;
     } else {
-        header->timeBasisCode = SEGY_TRACE_TIMEBASIC_GMT;
+        header->timeBasisCode = SEGY_TRACE_TIMEBASIS_GMT;
     }
 	header->traceWeightingFactor = htons(0);
 	header->phoneRollPos1 = htons(0);
@@ -1081,28 +1081,33 @@ int main(int argc, char **argv)
 				}
 				else
 				{
-				/* Note negative here.  This is a oddity
-				of segy that - means divide by this to
-				get actual.  Always make this negative in case
-				user inputs a negative number. */
-				  header[ichan].coordScale = htons(-abs(coordScale));
-				  /* Force 2 = geographic coordinates.  Standard says when this is
-				  so units are arc seconds, hence we multiply deg by 3600*coordScale */
-				  if(use_geo_coordinates)
-				  {
-				    header[ichan].coordUnits = htons(2);
-				    header[ichan].recLongOrX
-				     = htonl((int32_t)(lon*3600.0*(double)coordScale));
-				    header[ichan].recLatOrY
-				     = htonl((int32_t)(lat*3600.0*(double)coordScale));
-				  }
-				  else
-				  {
-				    header[ichan].recLongOrX
-				     = htonl((int32_t)(lon*(double)coordScale));
-				    header[ichan].recLatOrY
-				     = htonl((int32_t)(lat*(double)coordScale));
-				  }
+					/* Note negative here.  This is a oddity
+					   of segy that - means divide by this to
+					   get actual.  Always make this negative in case
+					   user inputs a negative number. */
+					if (abs(coordScale) == 1) {
+						header[ichan].coordScale = htons(1);
+					} else {
+						header[ichan].coordScale = htons(-abs(coordScale));
+					}
+					/* Force 2 = geographic coordinates.  Standard says when
+					 * this is so units are arc seconds, hence we multiply deg
+					 * by 3600*coordScale */
+					if(use_geo_coordinates)
+					{
+						header[ichan].coordUnits = htons(2);
+						header[ichan].recLongOrX
+							= htonl((int32_t)(lon*3600.0*(double)coordScale));
+						header[ichan].recLatOrY
+							= htonl((int32_t)(lat*3600.0*(double)coordScale));
+					}
+					else
+					{
+						header[ichan].recLongOrX
+							= htonl((int32_t)(lon*(double)coordScale));
+						header[ichan].recLatOrY
+							= htonl((int32_t)(lat*(double)coordScale));
+					}
 				}
 				header[ichan].recElevation = htonl((int32_t)(elev*1000.0));
 				header[ichan].deltaSample = htons((int16_t)
