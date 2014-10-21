@@ -198,7 +198,7 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 	header->coordScale = htons(1);
 	header->sourceLongOrX = htonl(0);
 	header->recLongOrX = htonl(0);
-	header->coordUnits = htons(1);  /* This sets units to m */
+	header->coordUnits = SEGY_TRACE_COORDUNITS_LENGTH;  /* sets units to m */
 	header->weatheringVelocity = htons(0);
 	header->subWeatheringVelocity = htons(0);
 	header->sourceUpholeTime = htons(0);
@@ -271,7 +271,7 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 	header->hour   = htons(0);
 	header->minute = htons(0);
 	header->second = htons(0);
- 	header->phoneFirstTrace = htons(0);
+	header->phoneFirstTrace = htons(0);
 	header->phoneLastTrace  = htons(0);
 	header->m_secs = htons(0);
 	header->initialGain = htons(0);
@@ -838,6 +838,23 @@ int main(int argc, char **argv)
 	/* boolean.  When nonzero set coordinates as geographic arc seconds values */
 	int use_geo_coordinates=pfget_boolean(pf,"use_geo_coordinates");
 
+	/* boolean. When nonzero, output decimal degrees instead of arcseconds if
+	 * the requested output format supports it (rev1 only) */
+	int prefer_decimal_degrees=pfget_boolean(pf, "prefer_decimal_degrees");
+
+	/* We now have enough information to decide the coordUnits for all traces */
+	int coordUnits = 0;
+	if (!use_geo_coordinates) {
+		coordUnits=SEGY_TRACE_COORDUNITS_LENGTH;
+	} else if (ntohs(segy_format) >= 0x0100 && prefer_decimal_degrees) {
+		coordUnits=SEGY_TRACE_COORDUNITS_DECIMAL_DEGREES;
+	} else {
+		coordUnits=SEGY_TRACE_COORDUNITS_ARCSECONDS;
+	}
+	/* We should have set our coordinate units now, barf if we haven't */
+	assert(coordUnits!=0);
+
+
 	/* trace_gain_type: signed int */
 	int16_t trace_gain_type = pfget_int(pf,"trace_gain_type");
 	if (trace_gain_type < 0)
@@ -969,6 +986,10 @@ int main(int argc, char **argv)
 			char stmp[40];
 			sscanf(s,"%s%ld%lf%lf%lf",stmp,&shotid,&slon,&slat,&selev);
 			time0=str2epoch(stmp);
+			if(coordUnits == SEGY_TRACE_COORDUNITS_ARCSECONDS) {
+				slat*=3600.0;
+				slon*=3600.0;
+			}
 		}
 		else
 		{
@@ -1069,51 +1090,82 @@ int main(int argc, char **argv)
 					ntohl(header[ichan].reelSeq),
 					shotid, evid);
 				header[ichan].traceID = get_trace_id_code_from_segtype(segtype);
-				for(j=0;j<nsamp;++j)
+				for(j=0;j<nsamp;++j) {
 				   traces[ichan][j] = htonf((float)trdata[j]);
+				}
 				/* header fields coming from trace table */
 				header[ichan].samp_rate = htonl(
 						(int32_t) (1000000.0/samprate0));
-				if(!use_geo_coordinates && ( coordScale==1))
-				{
-				  header[ichan].recLongOrX = htonl((int32_t)(deast *1000.0));
-				  header[ichan].recLatOrY  = htonl((int32_t)(dnorth*1000.0));
+				/* according to the behavior specified in the man page:
+				 * if use_geo_coordinates is false:
+				 * - coordUnits is length (meters)
+				 * - therefore, we use deast for X and dnorth for Y
+				 * if use_geo_coordinates is true:
+				 * - we're using either arcseconds or decimal degrees
+				 * - and therefore, we use lon for X and lat for Y
+				 *
+				 * coordUnits is based on use_arcseconds and the requested
+				 * version of segY */
+
+				/* set the coordinate units in the trace header */
+				header[ichan].coordUnits = coordUnits;
+
+				/* Pick the source db fields for our receiver X and Y */
+				double recLongOrX = 0;
+				double recLatOrY  = 0;
+				if (coordUnits == SEGY_TRACE_COORDUNITS_LENGTH) {
+					/* Use deast and dnorth
+					 * CSS3.0 Schema specifies deast and dnorth are in KM.
+					 * SEG-Y specifies easting and northing as meters,
+					 * hence the 1000.0 multiplier here. */
+					recLongOrX = deast  * 1000.0;
+					recLatOrY  = dnorth * 1000.0;
+				} else if (coordUnits == SEGY_TRACE_COORDUNITS_ARCSECONDS){
+					/* Use lat and lon, converted to arcseconds */
+					recLongOrX = lon * 3600.0;
+					recLatOrY  = lat * 3600.0;
+				} else {
+					/* Default case, which covers decimal degrees */
+					recLongOrX = lon;
+					recLatOrY  = lat;
 				}
-				else
+
+				/* Apply our coordScale - the user can specify negative numbers,
+				 * but they are treated as inverting the value, not as a divisor
+				 * as in the SEG-Y field usage. See below where we always treat
+				 * the scalar as a divisor in the SEG-Y field */
+				slat *= (double)coordScale;
+				slon *= (double)coordScale;
+				recLongOrX *= (double)coordScale;
+				recLatOrY  *= (double)coordScale;
+
+				/* Set the coordScale in the header.
+				 * Note negative here.  This is a oddity of segy that - means
+				 * divide by this to get actual.  Always make this negative in
+				 * case user inputs a negative number.
+				 * Don't set it -1 for cosmetic reasons */
+				if (abs(coordScale) == 1)
 				{
-					/* Note negative here.  This is a oddity
-					   of segy that - means divide by this to
-					   get actual.  Always make this negative in case
-					   user inputs a negative number. */
-					if (abs(coordScale) == 1) {
-						header[ichan].coordScale = htons(1);
-					} else {
-						header[ichan].coordScale = htons(-abs(coordScale));
-					}
-					/* Force 2 = geographic coordinates.  Standard says when
-					 * this is so units are arc seconds, hence we multiply deg
-					 * by 3600*coordScale */
-					if(use_geo_coordinates)
-					{
-						header[ichan].coordUnits = htons(2);
-						header[ichan].recLongOrX
-							= htonl((int32_t)(lon*3600.0*(double)coordScale));
-						header[ichan].recLatOrY
-							= htonl((int32_t)(lat*3600.0*(double)coordScale));
-					}
-					else
-					{
-						header[ichan].recLongOrX
-							= htonl((int32_t)(lon*(double)coordScale));
-						header[ichan].recLatOrY
-							= htonl((int32_t)(lat*(double)coordScale));
-					}
+					header[ichan].coordScale = htons(1);
+				} else
+				{
+					header[ichan].coordScale = htons(-abs(coordScale));
 				}
+
+				/* Finally, write out the X and Y */
+				header[ichan].recLongOrX
+					= htonl((int32_t)recLongOrX);
+				header[ichan].recLatOrY
+					= htonl((int32_t)recLatOrY);
+
+				/* CSS3.0 specfies elev as being in km, SEG-Y wants it in m */
 				header[ichan].recElevation = htonl((int32_t)(elev*1000.0));
-				header[ichan].deltaSample = htons((int16_t)
-						(1000000.0/samprate0));
+
+				header[ichan].deltaSample = htons(
+						(int16_t) (1000000.0/samprate0));
 				header[ichan].sampleLength = htons((int16_t)nsamp0);
-				if (ntohs(segy_format)<0x0100) {
+				if (ntohs(segy_format)<0x0100)
+				{
 					header[ichan].num_samps = htonl((int32_t)nsamp0);
 				}
 				/* This cracks the time fields */
@@ -1128,7 +1180,8 @@ int main(int argc, char **argv)
 				header[ichan].minute = htons(hminute);
 				header[ichan].second = htons(hsecond);
 				header[ichan].m_secs = htons(hm_secs);
-				if (ntohs(segy_format)<0x0100) {
+				if (ntohs(segy_format)<0x0100)
+				{
 					/* These are IRIS-PASSCAL extensions */
 					header[ichan].trigyear   = header[ichan].year;
 					header[ichan].trigday    = header[ichan].day;
@@ -1139,17 +1192,12 @@ int main(int argc, char **argv)
 				free(time_str);
 				if(input_source_coordinates)
 				{
-					if(use_geo_coordinates)
-					{
-						slat*=3600.0;
-						slon*=3600.0;
-					}
-					header[ichan].sourceLongOrX
-						=htonl((int32_t)(slon*(double)coordScale));
-					header[ichan].sourceLatOrY
-						=htonl((int32_t)(slat*(double)coordScale));
+					/* Fix a bug here where we keep scaling the source
+					 * coordinates for each channel instead of once */
+					header[ichan].sourceLongOrX = htonl((int32_t)slon);
+					header[ichan].sourceLatOrY  = htonl((int32_t)slat);
 					header[ichan].sourceSurfaceElevation
-						=htonl((int32_t)selev);
+						= htonl((int32_t)selev);
 					/* No easy way to specify both elev and depth*/
 					header[ichan].sourceDepth=htonl(0);
 				}

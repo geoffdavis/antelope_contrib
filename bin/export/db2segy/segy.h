@@ -155,6 +155,12 @@ typedef struct SEGYTraceHeader {
 } SEGYTraceHeader; /* end of segy trace header */
 #define SEGY_TRACE_HEADER_SIZE 240
 
+/* Values for the coordUnits in the Trace Header Blocks (bytes 89-90) */
+#define SEGY_TRACE_COORDUNITS_LENGTH htons(1)
+#define SEGY_TRACE_COORDUNITS_ARCSECONDS htons(2)
+#define SEGY_TRACE_COORDUNITS_DECIMAL_DEGREES htons(3) /* rev1 or greater */
+#define SEGY_TRACE_COORDUNITS_DMS htons(4)             /* rev1 or greater */
+
 /* Values for the timeBasisCode in the Trace Header Blocks (bytes 167-168) */
 #define SEGY_TRACE_TIMEBASIS_UNKNOWN htons(0)
 #define SEGY_TRACE_TIMEBASIS_LOCAL htons(1)

@@ -101,12 +101,20 @@ origin
 #
 use_32bit_nsamp false
 input_source_coordinates false
+# coordinate_scale_factor only used if input_source_coordinates is true
+# Set this to at least 10000 if using prefer_decimal_degrees below in order
+# to get the full resolution of the CSS3.0 lat and lon fields
 coordinate_scale_factor 3600
 use_geo_coordinates true
 
 #
 # Additional features added in 2014
 #
+# If true, source and receiver coordinates are output in decimal degrees
+# (SEG-Y Rev1 only). Has no effect for SU or Rev0 modes
+# If false, source and receiver coordinates are output in arcseconds.
+# Be sure to set coordinate_scale_factor to 10000 if using decimal degrees
+prefer_decimal_degrees false
 
 # trace_gain controls the value of the "gain type of field instruments" field
 # (bytes 119-120) in the trace header.
