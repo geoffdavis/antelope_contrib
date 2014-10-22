@@ -542,8 +542,9 @@ void set_shot_variable(Dbptr db, Arr *tables, int evid, SEGYTraceHeader *h)
 	}
 	dbfree(db);
 }
+
 /* The trace library routines that existed at the time this code
-was written were heavy handed about dealing with taps.  trload_css
+was written were heavy handed about dealing with gaps.  trload_css
 calls trgetwf which in turn calls gaps2tr.  This sets all gaps to
 the fillgap value for the specified data type.  Unfortunately,
 this causes a problem with clipped data.  A clip is indeed a "gap"
@@ -759,7 +760,7 @@ int main(int argc, char **argv)
 			usage();
 		}
 	}
-	/* Parameter sanity checking */
+	/* Command-line parameter sanity checking */
 	if (write_reel_headers==0 && segy_format != SEGY_FORMAT_SU){
 		complain(0, "The SU option cannot be used with the -V option");
 		usage();
@@ -826,15 +827,7 @@ int main(int argc, char **argv)
 		nsamp0 = SEGY_MAX_NSAMP;
 		}
 	}
-	input_source_coordinates=pfget_boolean(pf,"input_source_coordinates");
-	if(input_source_coordinates)
-	{
-		coordScale=pfget_int(pf,"coordinate_scale_factor");
-	}
-	else
-	{
-		coordScale=1;
-	}
+
 	/* boolean.  When nonzero set coordinates as geographic arc seconds values */
 	int use_geo_coordinates=pfget_boolean(pf,"use_geo_coordinates");
 
@@ -851,9 +844,34 @@ int main(int argc, char **argv)
 	} else {
 		coordUnits=SEGY_TRACE_COORDUNITS_ARCSECONDS;
 	}
-	/* We should have set our coordinate units now, barf if we haven't */
+	/* We should have set our coordinate units now */
 	assert(coordUnits!=0);
 
+	input_source_coordinates=pfget_boolean(pf,"input_source_coordinates");
+	if(input_source_coordinates)
+	{
+		coordScale=pfget_int(pf,"coordinate_scale_factor");
+	}
+	else if (coordUnits==SEGY_TRACE_COORDUNITS_DECIMAL_DEGREES)
+	{
+		/* Use a sane scalar for decimal degrees. 10000 gives four decimal
+		 * places of accuracy, which matches the CSS3.0 spec for lat and lon */
+		coordScale=10000;
+	}
+	else
+	{
+		coordScale=1;
+	}
+
+	/* Print a diagnostic message if the user gave a sub-optimal value for the
+	 * coordScale */
+	if (coordUnits == SEGY_TRACE_COORDUNITS_DECIMAL_DEGREES &&
+			coordScale < 10000)
+	{
+		elog_alert(0,
+				"The supplied parameter 'coordinate_scale_factor' value of %d is less than 10000, and will cause loss of precision for decimal degree coordinates.",
+				coordScale);
+	}
 
 	/* trace_gain_type: signed int */
 	int16_t trace_gain_type = pfget_int(pf,"trace_gain_type");
@@ -896,10 +914,10 @@ int main(int argc, char **argv)
 	pushtbl(sortkeys,"sta");
 	pushtbl(sortkeys,"chan");
 
+    /* Set up and write the Textual File Header */
 	initialize_text_header(text_file_header, segy_format,
 			text_header_description);
 
-	/* Just blindly write this turkey. Bad form, but tough*/
 	if(write_reel_headers){
 		if ( fwrite(text_file_header,1,SEGY_TEXT_HEADER_SIZE,fp) \
 				!= SEGY_TEXT_HEADER_SIZE ) {
@@ -990,6 +1008,8 @@ int main(int argc, char **argv)
 				slat*=3600.0;
 				slon*=3600.0;
 			}
+			slat *= (double)coordScale;
+			slon *= (double)coordScale;
 		}
 		else
 		{
@@ -1054,7 +1074,7 @@ int main(int argc, char **argv)
 			    "segtype",&segtype,
 			    NULL) == dbINVALID)
 			{
-				elog_complain(0," dbgetv error reading record %ld\nTrace will be skipped for station %s and channel %s\n",
+				elog_complain(0," dbgetv error reading record %ld. Trace will be skipped for station %s and channel %s",
 				trdb.record,sta,chan);
 				continue;
 			}
@@ -1063,29 +1083,32 @@ int main(int argc, char **argv)
 			double frskewcut=0.01;
 			if(fsrskew>frskewcut)
 			{
-				elog_complain(0,"%s:%s sample rate %f is significantly different from base sample rate of %f\nTrace skipped -- segy requires fixed sample rates\n",
+				elog_complain(0,"%s:%s sample rate %f is significantly different from base sample rate of %f. Trace skipped -- segy requires fixed sample rates",
 					sta,chan,samprate,samprate0);
 				continue;
 			}
 			if(nsamp > nsamp0)
 			{
-				elog_complain(0,"%s:%s trace has extra samples=%ld. Truncated to length %d\n",
+				elog_complain(0,"%s:%s trace has extra samples=%ld. Truncated to length %d",
 					sta, chan, nsamp, nsamp0);
 				nsamp = nsamp0;
 			}
 			else if(nsamp < nsamp0)
 			{
-				elog_complain(0,"%s:%s trace is shorter than expected %d samples. Zero padded after sample %ld\n",
+				elog_complain(0,"%s:%s trace is shorter than expected %d samples. Zero padded after sample %ld",
 					sta, chan, nsamp0, nsamp);
 			}
 
 			ichan = get_channel_index(channels,sta,chan);
-			if(ichan > nchan) elog_die(0,"Channel index %d outside limit of %d. Cannot continue\n",
+			if(ichan > nchan)
+			{
+				elog_die(0,"Channel index %d outside limit of %d. Cannot continue",
 					ichan, nchan);
+			}
 			if(ichan >= 0)
 			{
 				if(Verbose)
-				   elog_debug(0,"%s:%s\t%-d\t%-d\t%-ld\t%-ld\n",
+					elog_debug(0,"%s:%s\t%-d\t%-d\t%-ld\t%-ld\n",
 					sta,chan,ichan+1,
 					ntohl(header[ichan].reelSeq),
 					shotid, evid);
@@ -1134,8 +1157,6 @@ int main(int argc, char **argv)
 				 * but they are treated as inverting the value, not as a divisor
 				 * as in the SEG-Y field usage. See below where we always treat
 				 * the scalar as a divisor in the SEG-Y field */
-				slat *= (double)coordScale;
-				slon *= (double)coordScale;
 				recLongOrX *= (double)coordScale;
 				recLatOrY  *= (double)coordScale;
 
@@ -1192,8 +1213,8 @@ int main(int argc, char **argv)
 				free(time_str);
 				if(input_source_coordinates)
 				{
-					/* Fix a bug here where we keep scaling the source
-					 * coordinates for each channel instead of once */
+					/* Write out our pre-scaled and optionally
+					 * arcsecond-converted source lat/lon plus our elevation */
 					header[ichan].sourceLongOrX = htonl((int32_t)slon);
 					header[ichan].sourceLatOrY  = htonl((int32_t)slat);
 					header[ichan].sourceSurfaceElevation
@@ -1250,4 +1271,3 @@ int main(int argc, char **argv)
 	}
 	return 0 ;
 }
-
