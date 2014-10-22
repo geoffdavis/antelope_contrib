@@ -79,32 +79,38 @@ demoninator in reflection data.
 .LP
 This program handles source and receiver coordinates according to the
 SEGY standard, but with some limitations.  The first is you either
-get units of meter or arcseconds depending on the setting of the parameter
-file boolean \fBuse_geo_coordinates\fR.  When this is true you will get
-coordinates in arc seconds, otherwise it will be meter or null.
+get units of meter, decimal degrees, or arcseconds depending on the setting of
+the parameter file boolean \fBuse_geo_coordinates\fR,
+\fBprefer_decimal_degrees\fR, and the \fB-V\fR command line option.
+When the \fBuse_geo_coordinates\fR boolean is true you will get output
+coordinates in either arc seconds (SEG-Y REV0) or decimal degrees (SEG-Y Rev1
+only, depending on the setting of \fBprefer_decimal_degrees\fR). Otherwise it
+will be meter or null.
+.LP
 Source coordinates are taken from the site table.  If using geographc
 coordinates the lat,lon fields are used.  If you are using meters the dnorth
-and deast fields of the site table are used.  Be warned the standard schema
-definition for Antelope for site coordinates will lead to a loss of accuracy
-for receiver coordinates as the number of digits stored is only sufficient for
-approximately 100 m accuracy.  If you need better resolution you will need to
-mess with the header data yourself.
+and deast fields of the site table are used.  When using arcseconds, be warned
+the standard schema definition for Antelope for site coordinates will lead to
+a loss of accuracy for receiver coordinates as the number of digits stored is
+only sufficient for approximately 100 m accuracy.  If you need better
+resolution you will need to mess with the header data yourself.
 .LP
 Source coordinates can optionally be passed to the program through the
 standard input stream.  This is controlled by a boolean variable
 \fRinput_source_coordinates.\fR.  Fields read as x=lon and y=lat are
 blindly converted depending upon the setting of \fBuse_geo_coordinates\fR.
-When true the input coordinates are converted to arcseconds, otherwise they
-are assumed in units of meters (e.g. UTM coordinates).
+When true the input coordinates are treated as decimal degrees and converted to
+arcseconds if necessary, otherwise they are assumed in units of meters
+(e.g. UTM coordinates).
 .LP
 The parameter \fBcoordinate_scale_factor\fR is treated as described in the
 standard with some restrictions.  Specifically, it is required to be a multiplier so
 if a number smaller than one is not allowed.  Internally the standard then requires
 this number to be converted to a negative value and stored at offset 71-72 in the
 segy header.  Thus, all coordinates stored in the header are multiplied by this
-value.  To restore them to meters divide by this number.  To restore geographic
-coordinates divide header values by coordinate_scale_factor*3600 to get decimal
-degrees of longitude and latitude.
+value.  To restore them to meters divide by this number.  To restore decimal
+degree coordinates from arcsecond coordinates, divide header values by
+(\fBcoordinate_scale_factor\fR * 3600).
 .LP
 \fBdb2segy\fR allows one to optionally rotate data to
 any specified orthonormal coordinate system.  This makes sense, of
@@ -238,25 +244,33 @@ variables to make the data look like stacked cdp data instead of shot
 gathers (the default behaviour).
 .LP
 The boolean \fBinput_source_coordinates\fR, \fBcoordinate_scale_factor\fR,
-and \fBuse_geo_coordinates\fR
-work together as described above.  I emphasize that when use_geo_coordinates
-is false receiver coordinates are extracted from the dnorth and deast fields
-of the site table and written in the headers in units of meters.
-When input_source_coordinates is true the coordinates are treated as geographic
-if use_geo_coordinates is true, but are written verbatim if this si false.  In either case
-the coordinate_scale_factor is always applied to coordinate values as specified by the
-standard.  Note that the scale factor is always a number greater than one for this program
-and is used as a mutiplier.  Be aware that because the standard says a mutiplier should
-be specified negative this attribute (stored in byte offset 71-72 in the segy header) will
-always be negative when written by this program.
+\fBuse_geo_coordinates\fR, and \fBprefer_decimal_degrees\fR along with the
+ \fB-V\fR command-line option work together as described above.  I emphasize
+that when use_geo_coordinates is false receiver coordinates are extracted from
+the dnorth and deast fields of the site table and written in the headers in
+units of meters.
+When \fBinput_source_coordinates\fR is true the coordinates are treated as
+geographic if \fBuse_geo_coordinates\fR is true, but are written verbatim if
+this is false.
+
+The \fBcoordinate_scale_factor\fR is applied to ALL coordinate values as
+specified by the standard if \fBinput_source_coordinates\fR is true.
+A reasonable scale factor is automatically chosen if
+\fBinput_scale_coordinates\fR is false.  Note that the scale factor is always
+a number greater than one for this program and is used as a mutiplier.
+Be aware that because the standard says a mutiplier should
+be specified negative this attribute (stored in byte offset 71-72 in the SEG-Y
+trace headers) will always be negative when written by this program.
 .LP
-The boolean \fBuse_32bit_nsamp\fR can be used if very long record lengths are desired.
-The segy standard stores the number of samples field in a 16 bit integer in both
-the reel and trace headers.  If set true, long record lengths will be handled and
-an extension field (num_samps in the PASSCAL segy extension definition), which
-is an 32 bit integer field, is used to store nsamp.  The regular nsamp field is
-simply silently truncated using a cast to a 16 bit field.  Use this feature with
-caution.
+For SEG-Y output versions 0 or SU, the boolean \fBuse_32bit_nsamp\fR can be
+used if very long record lengths are desired.  The segy standard stores the
+number of samples field in a 16 bit integer in both
+the reel and trace headers.  If set true, long record lengths will be handled
+and an extension field (num_samps in the PASSCAL SEG-Y extension definition),
+which is an 32 bit integer field, is used to store nsamp.  The regular nsamp
+field is simply silently truncated using a cast to a 16 bit field.  Use this
+feature with caution. Note that this option is ignored for SEG-Y Rev1 because
+the PASSCAL extension field conflicts with a new field in the Rev 1 standard.
 .LP
 The integer \fBtrace_gain_type\fR overrides the "gain type of field instruments"
 field (bytes 119-12) in the trace header. 0 = unknown; 1 = fixed gain;
