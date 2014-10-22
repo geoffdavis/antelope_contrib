@@ -872,6 +872,14 @@ int main(int argc, char **argv)
 				"The supplied parameter 'coordinate_scale_factor' value of %d is less than 10000, and will cause loss of precision for decimal degree coordinates.",
 				coordScale);
 	}
+    else if (coordUnits == SEGY_TRACE_COORDUNITS_ARCSECONDS)
+    {
+        if (coordScale > 1000) {
+            elog_alert(0,
+                    "The supplied parameter 'coordinate_scale_factor' value of %d is greater than 1000, and will cause loss of precision for arcsecond coordinates.",
+                    coordScale);
+        }
+    }
 
 	/* trace_gain_type: signed int */
 	int16_t trace_gain_type = pfget_int(pf,"trace_gain_type");
