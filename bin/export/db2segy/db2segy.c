@@ -141,10 +141,10 @@ int16_t get_trace_id_code_from_segtype(char segtype)
 		case 'A':
 		case 'V':
 		case 'D':
-			return htons(1);
+			return SEGY_TRACE_ID_SEISMIC;
 			break;
 		case 'I':
-			return htons((int16_t)-1);
+			return SEGY_TRACE_ID_OTHER;
 			break;
 		default:
 			return 0;
@@ -185,7 +185,7 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 	header->energySourcePt = htonl(1);
 	header->cdpEns = htonl(0);
 	header->traceInEnsemble = htonl(0);
-	header->traceID = htonl(2);  /* note default is dead */
+	header->traceID = SEGY_TRACE_ID_DEAD;
 	header->vertSum = htons(0);
 	header->dataUse = htons(0);
 	header->sourceToRecDist = htonl(0);
@@ -233,7 +233,7 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 	header->phoneRollPos1 = htons(0);
 	header->gapSize = htons(0);
 	header->taperOvertravel = htons(0);
-	header->extrash[10] = htons(0);
+	/*header->extrash[10] is pre-zero'd */
 	header->samp_rate = htonl(0);
 	/* Begin Pavlis/IRIS-PASSCAL non-standard extensions */
 	if (ntohs(segy_format)<0x0100) {
@@ -249,7 +249,7 @@ initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
 		header->inst_no = htons(0);
 		header->not_to_be_used = htons(0);
 		header->num_samps = htonl(0);
-		header->extra[8] = 0;
+		/* header->extra is pre-zeroed */
 	}
 	/* End Pavlis non-standard extension */
 	header->reelSeq = htonl(1);

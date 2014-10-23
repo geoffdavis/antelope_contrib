@@ -155,6 +155,20 @@ typedef struct SEGYTraceHeader {
 } SEGYTraceHeader; /* end of segy trace header */
 #define SEGY_TRACE_HEADER_SIZE 240
 
+/* Values for the traceID in the Trace Header Blocks (bytes 29-30)
+ * Note: this is not an exhaustive list, it just covers some commonly used
+ * types from the 1975 standard. Rev 1 defines additional values from 9-22. */
+#define SEGY_TRACE_ID_OTHER htons(-1)
+#define SEGY_TRACE_ID_UNKNOWN htons(0)
+#define SEGY_TRACE_ID_SEISMIC htons(1)
+#define SEGY_TRACE_ID_DEAD htons(2)
+#define SEGY_TRACE_ID_DUMMY htons(3)
+#define SEGY_TRACE_ID_TIME_BREAK htons(4)
+#define SEGY_TRACE_ID_UPHOLE htons(5)
+#define SEGY_TRACE_ID_SWEEP htons(6)
+#define SEGY_TRACE_ID_TIMING htons(7)
+#define SEGY_TRACE_ID_WATER_BREAK htons(8)
+
 /* Values for the coordUnits in the Trace Header Blocks (bytes 89-90) */
 #define SEGY_TRACE_COORDUNITS_LENGTH htons(1)
 #define SEGY_TRACE_COORDUNITS_ARCSECONDS htons(2)
