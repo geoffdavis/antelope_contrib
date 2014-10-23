@@ -22,13 +22,15 @@ The record length is defined in the parameter file.  The sample rate
 needs to be defined in the parameter file also.  Any deviations from
 that sample rate will cause the program to die.
 
-Author:  Gary L. Pavlis
+Authors:  Gary L. Pavlis and Geoffrey A Davis
 Written:  November 1998 in a hack form.  This version is a descendent
 that recycled some of the original code written in February 1999.
+Updated: 2014 with SEGY Rev1 compatibility
 
 */
 #include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
 #include "stock.h"
 #include "coords.h"
 #include "db.h"
@@ -43,33 +45,147 @@ that recycled some of the original code written in February 1999.
 /* Newer compilers will complain if these prototypes are not defined.
 Could be placed in segy.y, but that would strike me as mysterious. */
 
-void initialize_header(SegyHead *header);
+void initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format);
+void initialize_binary_file_header(SEGYBinaryFileHeader *reel, int16_t segy_format);
 char *make_key(char *s, char *c);
 Arr *build_stachan_list(Pf *pf, int *nchan,int verbose);
 int get_channel_index(Arr *a, char *sta, char *chan);
 Arr *check_tables(Dbptr db, Pf *pf);
 void check_for_required_tables(Arr *tabarray);
 Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables);
-void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h);
+void set_shot_variable(Dbptr db, Arr *tables, int evid, SEGYTraceHeader *h);
 void repair_gaps(Dbptr trdb);
+int16_t get_trace_id_code_from_segtype(char segtype);
+void initialize_text_header (char *out, int16_t segy_format, char *desc);
+
+/* Fill out the 3200-byte text header block. This block is organized into 40
+ * records of 80 character columns, with the first four characters of each
+ * line/record serving as record markers. The record numbers are in the format
+ * "CXX " where XX is a space padded two digit number.
+ *
+ * If the requested segy_format is not Rev 1 or greater, output all text in
+ * EBCDIC, translating any supplied ASCII text on the fly.
+ *
+ * The desc string is an optional 76 character string that will go in the first
+ * record (aka "C 1")
+ * If desc overflows 76 characters, it is truncated and a warning is sent to
+ * elog. */
+void
+initialize_text_header (char *out, int16_t segy_format, char *desc)
+{
+	memset(out, '\0', SEGY_TEXT_HEADER_SIZE);
+
+	int ebcdic=1;
+	/* If we're SEG-Y Rev1 or later, use ASCII */
+	if(ntohs(segy_format) >= 0x0100) {
+		ebcdic=0;
+	}
+
+	/* Fill in the standard record headers */
+	for(int row=0; row < SEGY_TEXT_HEADER_RECORDS; row++)
+	{
+		snprintf(out + (row*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C%2d ", row+1);
+	}
+
+	int desclen=0;
+	if (desc){
+		desclen=strlen(desc);
+	}
+
+	if (desclen > 0) {
+		/* insert our description in record 1 */
+		elog_debug(0,"Got a description field: %s", desc);
+		if (desclen > SEGY_TEXT_HEADER_USABLE_COLUMNS) {
+			elog_complain(0,
+					"The description field overflows the allowed %d character limit by %d characters. Truncating.",
+					SEGY_TEXT_HEADER_USABLE_COLUMNS,
+					desclen - SEGY_TEXT_HEADER_USABLE_COLUMNS);
+		}
+		strncpy(out+4, desc, SEGY_TEXT_HEADER_USABLE_COLUMNS);
+	}
+
+	/* Insert our advertising clause */
+	snprintf( out + (37*SEGY_TEXT_HEADER_COLUMNS),
+			SEGY_TEXT_HEADER_COLUMNS, "C38 OUTPUT BY: ANTELOPE DB2SEGY");
+
+	/* Print out the mandatory SEG-Y Rev1 format marker */
+	if (segy_format == SEGY_FORMAT_REV_1_0) {
+		snprintf(out+(38*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C39 SEG Y REV1");
+	}
+	/* Print out the SEG-Y end blurb (Mandatory in Rev1) */
+	if (ebcdic) {
+		snprintf(out+(39*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C40 END EBCDIC");
+	} else {
+		snprintf(out+(39*SEGY_TEXT_HEADER_COLUMNS),
+				SEGY_TEXT_HEADER_COLUMNS, "C40 END TEXTUAL HEADER");
+	}
+
+	/* Translate from ASCII to EBCDIC if necessary */
+	if (ebcdic) { for(int i=0; i < SEGY_TEXT_HEADER_SIZE; i++) {
+		char *s = out + i;
+		*s = a2e[(unsigned char)*s ];
+	} }
+}
+
+/* Map CSS3.0 segtype to one of the SEG-Y rev1 trace identification codes.
+ * At this point we're going to assume 1 (seismic) for types A or V,
+ * -1 (Other) for a few known types,
+ * and 0 (Unknown) otherwise */
+int16_t get_trace_id_code_from_segtype(char segtype)
+{
+	switch(segtype)
+	{
+		case 'A':
+		case 'V':
+		case 'D':
+			return SEGY_TRACE_ID_SEISMIC;
+			break;
+		case 'I':
+			return SEGY_TRACE_ID_OTHER;
+			break;
+		default:
+			return 0;
+	}
+	return 0;
+}
 
 static void
 usage()
 {
-	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile -SU -ss subset -v]\n");
+	fprintf(stderr,"Usage:  db2segy dbin outfile [-pf pffile [-SU|-V SU|-V 0|-V 1] -ss subset -d \"description\"]\n");
 	exit(-1);
 }
 
 void
-initialize_header(SegyHead *header)
+initialize_binary_file_header(SEGYBinaryFileHeader *reel, int16_t segy_format)
 {
+	assert( sizeof(SEGYBinaryFileHeader)==SEGY_BINARY_HEADER_SIZE );
+	assert( segy_format == SEGY_FORMAT_REV_0 || \
+			segy_format == SEGY_FORMAT_REV_1_0 );
+
+	memset(reel, '\0', sizeof(SEGYBinaryFileHeader));
+	reel->segy_format = segy_format;
+
+    /* This is technically REV1 only, but the field was part of a large
+     * unused block in the original version of this program. */
+    reel->fixed_length_trace_flag = SEGY_TRLEN_FIXED;
+}
+
+void
+initialize_trace_header(SEGYTraceHeader *header, int16_t segy_format)
+{
+	assert( sizeof(SEGYTraceHeader)==SEGY_TRACE_HEADER_SIZE );
+	memset(header, '\0', sizeof(SEGYTraceHeader));
 	header->lineSeq = htonl(1);
 	header->event_number = htonl(1);
 	header->channel_number = htonl(1);
 	header->energySourcePt = htonl(1);
 	header->cdpEns = htonl(0);
 	header->traceInEnsemble = htonl(0);
-	header->traceID = htonl(2);  /* note default is dead */
+	header->traceID = SEGY_TRACE_ID_DEAD;
 	header->vertSum = htons(0);
 	header->dataUse = htons(0);
 	header->sourceToRecDist = htonl(0);
@@ -82,7 +198,7 @@ initialize_header(SegyHead *header)
 	header->coordScale = htons(1);
 	header->sourceLongOrX = htonl(0);
 	header->recLongOrX = htonl(0);
-	header->coordUnits = htons(1);  /* This sets units to m */
+	header->coordUnits = SEGY_TRACE_COORDUNITS_LENGTH;  /* sets units to m */
 	header->weatheringVelocity = htons(0);
 	header->subWeatheringVelocity = htons(0);
 	header->sourceUpholeTime = htons(0);
@@ -93,7 +209,7 @@ initialize_header(SegyHead *header)
 	header->muteStart = htons(0);
 	header->sampleLength = htons(0);
 	header->deltaSample = htons(0);
-	header->gainType = htons(0);
+	header->gainType = SEGY_TRACE_GAIN_UNKNOWN;
 	header->gainConst = htons(0);
 	header->correlated = htons(0);
 	header->sweepStart = htons(0);
@@ -106,26 +222,36 @@ initialize_header(SegyHead *header)
 	header->lowCutFreq = htons(0);
 	header->lowCutSlope = htons(0);
 	header->year = htons(0);
-	header->timeBasisCode = htons(2);  /* this means gmt time */
+    /* SEG-Y "classic" supports only time basis codes 0-3. Antelope records
+     * in UTC (which has leap second corrections). */
+    if (ntohs(segy_format)>=0x0100) {
+        header->timeBasisCode = SEGY_TRACE_TIMEBASIS_UTC;
+    } else {
+        header->timeBasisCode = SEGY_TRACE_TIMEBASIS_GMT;
+    }
 	header->traceWeightingFactor = htons(0);
 	header->phoneRollPos1 = htons(0);
 	header->gapSize = htons(0);
 	header->taperOvertravel = htons(0);
-	header->extrash[10] = htons(0);
+	/*header->extrash[10] is pre-zero'd */
 	header->samp_rate = htonl(0);
-	/* Always ieee floats in this program for now */
-	header->data_form  = htons(5);
-	header->trigyear   = htons(0);
-	header->trigday    = htons(0);
-	header->trighour   = htons(0);
-	header->trigminute = htons(0);
-	header->trigsecond = htons(0);
-	header->trigmills  = htons(0);
-	header->scale_fac = htonf(0);
-	header->inst_no = htons(0);
-	header->not_to_be_used = htons(0);
-	header->num_samps = htonl(0);
-	header->extra[8] = 0;
+	/* Begin Pavlis/IRIS-PASSCAL non-standard extensions */
+	if (ntohs(segy_format)<0x0100) {
+		/* Always ieee floats in this program for now */
+		header->data_form  = htons(5);
+		header->trigyear   = htons(0);
+		header->trigday    = htons(0);
+		header->trighour   = htons(0);
+		header->trigminute = htons(0);
+		header->trigsecond = htons(0);
+		header->trigmills  = htons(0);
+		header->scale_fac = htonf(0);
+		header->inst_no = htons(0);
+		header->not_to_be_used = htons(0);
+		header->num_samps = htonl(0);
+		/* header->extra is pre-zeroed */
+	}
+	/* End Pavlis non-standard extension */
 	header->reelSeq = htonl(1);
 	header->horSum = htons(0);
 	header->datumElemSource = htonl(0);
@@ -145,7 +271,7 @@ initialize_header(SegyHead *header)
 	header->hour   = htons(0);
 	header->minute = htons(0);
 	header->second = htons(0);
- 	header->phoneFirstTrace = htons(0);
+	header->phoneFirstTrace = htons(0);
 	header->phoneLastTrace  = htons(0);
 	header->m_secs = htons(0);
 	header->initialGain = htons(0);
@@ -179,7 +305,7 @@ Arr *build_stachan_list(Pf *pf, int *nchan,int verbose)
 	int *channel_number;  /* value stored in arr */
 
 	if(verbose)
-		fprintf(stdout,"Station   Channel_code    Channel_number\n");
+		elog_notify(0,"Station   Channel_code    Channel_number\n");
 	a = newarr(0);
 	t = pfget_tbl(pf,"channels");
 	if(t==NULL) elog_die(0,"Parameter file error:  no channels table\n");
@@ -194,7 +320,7 @@ Arr *build_stachan_list(Pf *pf, int *nchan,int verbose)
 		*channel_number = i;
 		setarr(a,key,(void *)channel_number);
 		if(verbose)
-			fprintf(stdout,"%s  %s  %d\n",sta,chan,(*channel_number)+1);
+			elog_notify(0,"%s  %s  %d\n",sta,chan,(*channel_number)+1);
 		free(key);
 	}
 	*nchan = maxtbl(t);
@@ -363,7 +489,7 @@ Dbptr join_tables(Dbptr db, Pf *pf, Arr *tables)
 
 
 
-void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h)
+void set_shot_variable(Dbptr db, Arr *tables, int evid, SEGYTraceHeader *h)
 {
 	int *ok;
 	char ss_string[30];
@@ -416,8 +542,9 @@ void set_shot_variable(Dbptr db, Arr *tables, int evid, SegyHead *h)
 	}
 	dbfree(db);
 }
+
 /* The trace library routines that existed at the time this code
-was written were heavy handed about dealing with taps.  trload_css
+was written were heavy handed about dealing with gaps.  trload_css
 calls trgetwf which in turn calls gaps2tr.  This sets all gaps to
 the fillgap value for the specified data type.  Unfortunately,
 this causes a problem with clipped data.  A clip is indeed a "gap"
@@ -508,8 +635,8 @@ void repair_gaps(Dbptr trdb)
 
 int main(int argc, char **argv)
 {
-	SegyReel reel;
-	SegyHead *header;
+	SEGYBinaryFileHeader reel;
+	SEGYTraceHeader *header;
 	char *dbin;
 	char *outfile;
 	FILE *fp;
@@ -520,7 +647,7 @@ int main(int argc, char **argv)
 	char *stest;
 
 	float **traces;
-	char reel1[3200];
+	char text_file_header[SEGY_TEXT_HEADER_SIZE];
 	Dbptr db, trdb, dbj;
 	Dbptr trdbss;
 	int nsamp0;
@@ -538,6 +665,7 @@ int main(int argc, char **argv)
 	Tbl *sortkeys=newtbl(0);
 	char sta[10],chan[10];
 	double lat, lon, elev, dnorth, deast, edepth;
+	char segtype;
 	char refsta[10];
 	int total_traces=0;
 	char *time_str;
@@ -566,11 +694,21 @@ int main(int argc, char **argv)
 	int use_32bit_nsamp;
 	/* This is switched on by argument switch.  When set to a nonzero
 	(default) the reel headers are written.  When 0 `
-	the reel heades will not be written -- used by seismic unix
-r
+	the reel headers will not be written -- used by seismic unix
 	and passcal*/
 	int write_reel_headers=1;
+
+	/* SEG-Y version to output. Default is original 1975 spec (rev 0) */
+	int16_t segy_format = SEGY_FORMAT_REV_0;
+
+	/* dbsubset query string */
 	char *substr=NULL;
+
+	/* text_header_description is a buffer holding a user-supplied description
+	 * to be placed in the 3200-byte text header block. It is controlled by
+	 * the parameter file value text_header_description or by the -d command
+	 * line option, with the latter taking precedence */
+	char* text_header_description=NULL;
 
 	if(argc < 3) usage();
 	dbin = argv[1];
@@ -591,22 +729,55 @@ r
 		{
 			Verbose=1;
 		}
+		else if(!strcmp(argv[i],"-d"))
+		{
+			++i;
+			text_header_description = strdup(argv[i]);
+		}
 		else if(!strcmp(argv[i],"-ss"))
 		{
 			++i;
 			substr=argv[i];
+		}
+		else if(!strcmp(argv[i],"-V"))
+		{
+			++i;
+			if     (!strcmp(argv[i],"0")) {segy_format = SEGY_FORMAT_REV_0;}
+			else if(!strcmp(argv[i],"1")) {segy_format = SEGY_FORMAT_REV_1_0;}
+			else if(!strcmp(argv[i],"SU"))
+			{
+				segy_format = SEGY_FORMAT_SU;
+				write_reel_headers=0;
+			}
+			else
+			{
+				elog_complain(0, "SEG-Y Version must be either 1 or 0");
+				usage();
+			}
 		}
 		else
 		{
 			usage();
 		}
 	}
+	/* Command-line parameter sanity checking */
+	if (write_reel_headers==0 && segy_format != SEGY_FORMAT_SU){
+		complain(0, "The SU option cannot be used with the -V option");
+		usage();
+	}
 	if(pfname == NULL) pfname = strdup("db2segy");
 
 	elog_init(argc, argv);
 
-	if(pfread(pfname,&pf))
+	if(pfread(pfname,&pf)) {
 		elog_die(0,"pfread error for pf file %s.pf\n",argv[0]);
+	}
+
+	/* Read the text_header_description if we weren't passed the -d option */
+	if (!text_header_description) {
+		text_header_description=pfget_string(pf, "text_header_description");
+	}
+
 	/* rotation parameters */
 	rotate=pfget_boolean(pf,"rotate");
 	if(rotate)
@@ -620,15 +791,15 @@ r
 
 	map_to_cdp = pfget_boolean(pf,"map_to_cdp");
 	if(map_to_cdp && Verbose)
-		fprintf(stdout,"Casting data as CDP stacked section\n");
+		elog_notify(0,"Casting data as CDP stacked section\n");
 	if(dbopen(dbin,"r",&db) == dbINVALID)
 	{
-		fprintf(stderr,"Cannot open db %s\n", dbin);
+		elog_complain(1,"Cannot open db %s\n", dbin);
 		usage();
 	}
 	/* We grab the sample rate and trace length (in seconds) and
 	use this to define global sample rates for the data.
-	segy REQUIRES fixed length records and sample rates, so
+	SEG-Y REV0 REQUIRES fixed length records and sample rates, so
 	irregular sample rates will cause this program to die.
 	One could add a decimate/interpolate function, but this
 	is not currently implemented */
@@ -636,33 +807,92 @@ r
 	tlength = pfget_double(pf,"trace_length");
 	nsamp0 = (int)(tlength*samprate0);
 	use_32bit_nsamp=pfget_boolean(pf,"use_32bit_nsamp");
+	if (ntohs(segy_format) >= 0x0100) {
+		elog_complain(0,"The 32-bit extension field is incompatible with SEG-Y REV 1. Ignoring 'use_32bit_nsamp' from the parameter file");
+		use_32bit_nsamp=0;
+	}
 
 	/* nsamp in segy is a 16 bit field.  Handling depends on
 	setting of use_32bit_nsamp boolean */
-	if(nsamp0 > 32767)
+	if(nsamp0 > SEGY_MAX_NSAMP)
 	{
-	    if(use_32bit_nsamp)
-	    {
-	    	elog_notify(0,"Warning:  segy ues a 16 bit entity to store number of samples\nThat field is garbage. Using the 32 bit extension field.\n");
-	    }
-	    else
-	    {
+		if(use_32bit_nsamp)
+		{
+			elog_notify(0,"Warning:  segy uses a 16 bit entity to store number of samples\nThat field is garbage. Using the 32 bit extension field.");
+		}
+		else
+		{
 		elog_complain(0,
-		  "Warning:  segy uses a 16 bit entity to store number of samples\nRequested %d samples per trace.  Trucated to 32767\n",nsamp0);
-		nsamp0 = 32767;
-	    }
+		  "Warning:  segy uses a 16 bit entity to store number of samples. Requested %d samples per trace.  Trucated to %d", nsamp0, SEGY_MAX_NSAMP);
+		nsamp0 = SEGY_MAX_NSAMP;
+		}
 	}
+
+	/* boolean.  When nonzero set coordinates as geographic arc seconds values */
+	int use_geo_coordinates=pfget_boolean(pf,"use_geo_coordinates");
+
+	/* boolean. When nonzero, output decimal degrees instead of arcseconds if
+	 * the requested output format supports it (rev1 only) */
+	int prefer_decimal_degrees=pfget_boolean(pf, "prefer_decimal_degrees");
+
+	/* We now have enough information to decide the coordUnits for all traces */
+	int coordUnits = 0;
+	if (!use_geo_coordinates) {
+		coordUnits=SEGY_TRACE_COORDUNITS_LENGTH;
+	} else if (ntohs(segy_format) >= 0x0100 && prefer_decimal_degrees) {
+		coordUnits=SEGY_TRACE_COORDUNITS_DECIMAL_DEGREES;
+	} else {
+		coordUnits=SEGY_TRACE_COORDUNITS_ARCSECONDS;
+	}
+	/* We should have set our coordinate units now */
+	assert(coordUnits!=0);
+
 	input_source_coordinates=pfget_boolean(pf,"input_source_coordinates");
 	if(input_source_coordinates)
 	{
 		coordScale=pfget_int(pf,"coordinate_scale_factor");
 	}
+	else if (coordUnits==SEGY_TRACE_COORDUNITS_DECIMAL_DEGREES)
+	{
+		/* Use a sane scalar for decimal degrees. 10000 gives four decimal
+		 * places of accuracy, which matches the CSS3.0 spec for lat and lon */
+		coordScale=10000;
+	}
 	else
 	{
 		coordScale=1;
 	}
-	/* boolean.  When nonzero set coordinates as geographic arc seconds values */
-	int use_geo_coordinates=pfget_boolean(pf,"use_geo_coordinates");
+
+	/* Print a diagnostic message if the user gave a sub-optimal value for the
+	 * coordScale */
+	if (coordUnits == SEGY_TRACE_COORDUNITS_DECIMAL_DEGREES &&
+			coordScale < 10000)
+	{
+		elog_alert(0,
+				"The supplied parameter 'coordinate_scale_factor' value of %d is less than 10000, and will cause loss of precision for decimal degree coordinates.",
+				coordScale);
+	}
+    else if (coordUnits == SEGY_TRACE_COORDUNITS_ARCSECONDS)
+    {
+        if (coordScale > 1000) {
+            elog_alert(0,
+                    "The supplied parameter 'coordinate_scale_factor' value of %d is greater than 1000, and will cause loss of precision for arcsecond coordinates.",
+                    coordScale);
+        }
+    }
+
+	/* trace_gain_type: signed int */
+	int16_t trace_gain_type = pfget_int(pf,"trace_gain_type");
+	if (trace_gain_type < 0)
+	{
+		die(0, "The trace_gain_type must be zero or greater");
+	}
+	else
+	{
+		trace_gain_type=htons(trace_gain_type);
+	}
+
+
 	/* check list of tables defined in pf.  Return array of
 	logicals that define which tables are valid and join
 	tables. */
@@ -675,8 +905,8 @@ r
 	dbquery(dbj,dbRECORD_COUNT,&ndbrows);
 	if(ndbrows<=0)
 	{
-		fprintf(stderr,"Working database view is empty\n");
-		if(substr!=NULL) fprintf(stderr,"Subset condtion =%s a likely problem\n",
+		elog_complain(1,"Working database view is empty\n");
+		if(substr!=NULL) elog_complain(0,"Subset condtion =%s a likely problem\n",
 				substr);
 		usage();
 	}
@@ -684,7 +914,7 @@ r
 	fp = fopen(outfile,"w");
 	if(fp == NULL)
 	{
-		fprintf(stderr,"Cannot open output file %s\n",outfile);
+		elog_complain(0,"Cannot open output file %s\n",outfile);
 		usage();
 	}
 
@@ -692,12 +922,16 @@ r
 	pushtbl(sortkeys,"sta");
 	pushtbl(sortkeys,"chan");
 
-	/*The reel1 header in true blue segy version 0 is ebcdic.  We are going to
-	just fill it with nulls and hope for the best */
-	for(i=0;i<3200;i++) reel1[i] = '\0';
+    /* Set up and write the Textual File Header */
+	initialize_text_header(text_file_header, segy_format,
+			text_header_description);
 
-	/* Just blindly write this turkey. Bad form, but tough*/
-	if(write_reel_headers) fwrite(reel1,1,3200,fp);
+	if(write_reel_headers){
+		if ( fwrite(text_file_header,1,SEGY_TEXT_HEADER_SIZE,fp) \
+				!= SEGY_TEXT_HEADER_SIZE ) {
+			elog_die(1,"An error occurred writing the textual file header");
+		}
+	}
 
 	/* memory allocation for trace data.  This is a large matrix
 	that is cleared for each event.  This model works because of
@@ -709,11 +943,15 @@ r
 	if(traces == NULL)
 		elog_die(0,"Cannot alloc trace data matrix work space of size %d by %d\n",
 			nchan, nsamp0);
-	header = (SegyHead *)calloc((size_t)nchan,sizeof(SegyHead));
+	header = (SEGYTraceHeader *)calloc((size_t)nchan,sizeof(SEGYTraceHeader));
 	if(header == NULL)
 			elog_die(0,"Cannot alloc memory for %d segy header workspace\n",nchan);
 	if(write_reel_headers)
 	{
+		if (Verbose) {
+			elog_debug(0,"Binary Headers - Using segy_format code 0x%04X\n", ntohs(segy_format));
+		}
+		initialize_binary_file_header(&reel, segy_format);
 
 		/* now fill in the binary reel header and write it */
 		reel.kjob   = htonl(1);
@@ -732,13 +970,10 @@ r
 		else
 			reel.ksort = htons(1);
 		reel.kunits = htons(1);  /* This sets units to always be meters */
-		for(i=0;i<24;++i) reel.unused1[i]='\0';
-		for(i=0;i<344;++i)reel.unused2[i]='\0';
 
-		if(fwrite((void *)(&reel),sizeof(SegyReel),1,fp) != 1)
+		if(fwrite((void *)(&reel),sizeof(SEGYBinaryFileHeader),1,fp) != 1)
 		{
-			fprintf(stderr,"Write error for binary reel header\n");
-			exit(-2);
+			elog_die(1,"Write error for binary reel header");
 		}
 	}
 
@@ -752,10 +987,11 @@ r
 	{
 		double slat,slon,selev;  /* Used when reading source location*/
 		if(Verbose)
-			fprintf(stdout,"Processing:  %s\n",s);
+			elog_notify(0,"Processing:  %s\n",s);
 		for(i=0;i<nchan;++i)
 		{
-			initialize_header(&(header[i]));
+			initialize_trace_header(&(header[i]), segy_format);
+			header[i].gainType = trace_gain_type;
 			header[i].lineSeq = htonl(total_traces + i + 1);
 			header[i].reelSeq = header[i].lineSeq;
 			if(map_to_cdp)
@@ -776,6 +1012,12 @@ r
 			char stmp[40];
 			sscanf(s,"%s%ld%lf%lf%lf",stmp,&shotid,&slon,&slat,&selev);
 			time0=str2epoch(stmp);
+			if(coordUnits == SEGY_TRACE_COORDUNITS_ARCSECONDS) {
+				slat*=3600.0;
+				slon*=3600.0;
+			}
+			slat *= (double)coordScale;
+			slon *= (double)coordScale;
 		}
 		else
 		{
@@ -789,11 +1031,11 @@ r
 		{
 			if(Verbose)
 			{
-			  fprintf(stdout,"trload_css failed for shotid=%ld",shotid);
-			  fprintf(stdout,"  No data in time range %s to %s\n",
+			  elog_notify(0,"trload_css failed for shotid=%ld",shotid);
+			  elog_notify(0,"  No data in time range %s to %s\n",
 			  	strtime(time0),strtime(endtime0) );
-			  fprintf(stdout,"No data written for this shotid block.");
-			  fprintf(stdout,"  Handle this carefully in geometry definitions.\n");
+			  elog_notify(0,"No data written for this shotid block.");
+			  elog_notify(0,"  Handle this carefully in geometry definitions.\n");
 			}
 
 			continue;
@@ -815,10 +1057,10 @@ r
 					stime, etime);
 		}
 		if(Verbose)
-			fprintf(stdout,"Station  chan_name  chan_number seq_number shotid  evid\n");
+			elog_notify(0,"Station  chan_name  chan_number seq_number shotid  evid\n");
 		trdb = dbsort(trdb,sortkeys,0,0);
 		dbquery(trdb,dbRECORD_COUNT,&ntraces);
-		if(Verbose) fprintf(stdout,"Read %ld traces for event at time%s\n",
+		if(Verbose) elog_debug(0,"Read %ld traces for event at time%s\n",
 			ntraces,strtime(time0));
 		for(trdb.record=0;trdb.record<ntraces;++trdb.record)
 		{
@@ -837,9 +1079,10 @@ r
 			    "dnorth",&dnorth,
 			    "deast",&deast,
 			    "edepth",&edepth,
-					NULL) == dbINVALID)
+			    "segtype",&segtype,
+			    NULL) == dbINVALID)
 			{
-				elog_complain(0," dbgetv error reading record %ld\nTrace will be skipped for station %s and channel %s\n",
+				elog_complain(0," dbgetv error reading record %ld. Trace will be skipped for station %s and channel %s",
 				trdb.record,sta,chan);
 				continue;
 			}
@@ -848,73 +1091,112 @@ r
 			double frskewcut=0.01;
 			if(fsrskew>frskewcut)
 			{
-				elog_complain(0,"%s:%s sample rate %f is significantly different from base sample rate of %f\nTrace skipped -- segy requires fixed sample rates\n",
+				elog_complain(0,"%s:%s sample rate %f is significantly different from base sample rate of %f. Trace skipped -- segy requires fixed sample rates",
 					sta,chan,samprate,samprate0);
 				continue;
 			}
 			if(nsamp > nsamp0)
 			{
-				elog_complain(0,"%s:%s trace has extra samples=%ld\nTruncated to length %d\n",
+				elog_complain(0,"%s:%s trace has extra samples=%ld. Truncated to length %d",
 					sta, chan, nsamp, nsamp0);
 				nsamp = nsamp0;
 			}
 			else if(nsamp < nsamp0)
 			{
-				elog_complain(0,"%s:%s trace is shorter than expected %d samples\nZero padded after sample %ld\n",
+				elog_complain(0,"%s:%s trace is shorter than expected %d samples. Zero padded after sample %ld",
 					sta, chan, nsamp0, nsamp);
 			}
 
 			ichan = get_channel_index(channels,sta,chan);
-			if(ichan > nchan) elog_die(0,"Channel index %d outside limit of %d\nCannot continue\n",
+			if(ichan > nchan)
+			{
+				elog_die(0,"Channel index %d outside limit of %d. Cannot continue",
 					ichan, nchan);
+			}
 			if(ichan >= 0)
 			{
 				if(Verbose)
-				   fprintf(stdout,"%s:%s\t%-d\t%-d\t%-ld\t%-ld\n",
+					elog_debug(0,"%s:%s\t%-d\t%-d\t%-ld\t%-ld\n",
 					sta,chan,ichan+1,
 					ntohl(header[ichan].reelSeq),
 					shotid, evid);
-				header[ichan].traceID = htons(1);
-				for(j=0;j<nsamp;++j)
+				header[ichan].traceID = get_trace_id_code_from_segtype(segtype);
+				for(j=0;j<nsamp;++j) {
 				   traces[ichan][j] = htonf((float)trdata[j]);
+				}
 				/* header fields coming from trace table */
 				header[ichan].samp_rate = htonl(
 						(int32_t) (1000000.0/samprate0));
-				if(!use_geo_coordinates && ( coordScale==1))
-				{
-				  header[ichan].recLongOrX = htonl((int32_t)(deast *1000.0));
-				  header[ichan].recLatOrY  = htonl((int32_t)(dnorth*1000.0));
+				/* according to the behavior specified in the man page:
+				 * if use_geo_coordinates is false:
+				 * - coordUnits is length (meters)
+				 * - therefore, we use deast for X and dnorth for Y
+				 * if use_geo_coordinates is true:
+				 * - we're using either arcseconds or decimal degrees
+				 * - and therefore, we use lon for X and lat for Y
+				 *
+				 * coordUnits is based on use_arcseconds and the requested
+				 * version of segY */
+
+				/* set the coordinate units in the trace header */
+				header[ichan].coordUnits = coordUnits;
+
+				/* Pick the source db fields for our receiver X and Y */
+				double recLongOrX = 0;
+				double recLatOrY  = 0;
+				if (coordUnits == SEGY_TRACE_COORDUNITS_LENGTH) {
+					/* Use deast and dnorth
+					 * CSS3.0 Schema specifies deast and dnorth are in KM.
+					 * SEG-Y specifies easting and northing as meters,
+					 * hence the 1000.0 multiplier here. */
+					recLongOrX = deast  * 1000.0;
+					recLatOrY  = dnorth * 1000.0;
+				} else if (coordUnits == SEGY_TRACE_COORDUNITS_ARCSECONDS){
+					/* Use lat and lon, converted to arcseconds */
+					recLongOrX = lon * 3600.0;
+					recLatOrY  = lat * 3600.0;
+				} else {
+					/* Default case, which covers decimal degrees */
+					recLongOrX = lon;
+					recLatOrY  = lat;
 				}
-				else
+
+				/* Apply our coordScale - the user can specify negative numbers,
+				 * but they are treated as inverting the value, not as a divisor
+				 * as in the SEG-Y field usage. See below where we always treat
+				 * the scalar as a divisor in the SEG-Y field */
+				recLongOrX *= (double)coordScale;
+				recLatOrY  *= (double)coordScale;
+
+				/* Set the coordScale in the header.
+				 * Note negative here.  This is a oddity of segy that - means
+				 * divide by this to get actual.  Always make this negative in
+				 * case user inputs a negative number.
+				 * Don't set it -1 for cosmetic reasons */
+				if (abs(coordScale) == 1)
 				{
-				/* Note negative here.  This is a oddity
-				of segy that - means divide by this to
-				get actual.  Always make this negative in case
-				user inputs a negative number. */
-				  header[ichan].coordScale = htons(-abs(coordScale));
-				  /* Force 2 = geographic coordinates.  Standard says when this is
-				  so units are arc seconds, hence we multiply deg by 3600*coordScale */
-				  if(use_geo_coordinates)
-				  {
-				    header[ichan].coordUnits = htons(2);
-				    header[ichan].recLongOrX
-				     = htonl((int32_t)(lon*3600.0*(double)coordScale));
-				    header[ichan].recLatOrY
-				     = htonl((int32_t)(lat*3600.0*(double)coordScale));
-				  }
-				  else
-				  {
-				    header[ichan].recLongOrX
-				     = htonl((int32_t)(lon*(double)coordScale));
-				    header[ichan].recLatOrY
-				     = htonl((int32_t)(lat*(double)coordScale));
-				  }
+					header[ichan].coordScale = htons(1);
+				} else
+				{
+					header[ichan].coordScale = htons(-abs(coordScale));
 				}
+
+				/* Finally, write out the X and Y */
+				header[ichan].recLongOrX
+					= htonl((int32_t)recLongOrX);
+				header[ichan].recLatOrY
+					= htonl((int32_t)recLatOrY);
+
+				/* CSS3.0 specfies elev as being in km, SEG-Y wants it in m */
 				header[ichan].recElevation = htonl((int32_t)(elev*1000.0));
-				header[ichan].deltaSample = htons((int16_t)
-						(1000000.0/samprate0));
+
+				header[ichan].deltaSample = htons(
+						(int16_t) (1000000.0/samprate0));
 				header[ichan].sampleLength = htons((int16_t)nsamp0);
-				header[ichan].num_samps = htonl((int32_t)nsamp0);
+				if (ntohs(segy_format)<0x0100)
+				{
+					header[ichan].num_samps = htonl((int32_t)nsamp0);
+				}
 				/* This cracks the time fields */
 				time_str = epoch2str(time0,fmt);
 				int16_t hyear, hday, hhour, hminute, hsecond, hm_secs;
@@ -927,27 +1209,24 @@ r
 				header[ichan].minute = htons(hminute);
 				header[ichan].second = htons(hsecond);
 				header[ichan].m_secs = htons(hm_secs);
-				/* These are PASSCAL extensions, but we'll
-				go ahead and set them anyway.*/
-				header[ichan].trigyear   = header[ichan].year;
-				header[ichan].trigday    = header[ichan].day;
-				header[ichan].trighour   = header[ichan].hour;
-				header[ichan].trigminute = header[ichan].minute;
-				header[ichan].trigsecond = header[ichan].second;
+				if (ntohs(segy_format)<0x0100)
+				{
+					/* These are IRIS-PASSCAL extensions */
+					header[ichan].trigyear   = header[ichan].year;
+					header[ichan].trigday    = header[ichan].day;
+					header[ichan].trighour   = header[ichan].hour;
+					header[ichan].trigminute = header[ichan].minute;
+					header[ichan].trigsecond = header[ichan].second;
+				}
 				free(time_str);
 				if(input_source_coordinates)
 				{
-					if(use_geo_coordinates)
-					{
-						slat*=3600.0;
-						slon*=3600.0;
-					}
-					header[ichan].sourceLongOrX
-						=htonl((int32_t)(slon*(double)coordScale));
-					header[ichan].sourceLatOrY
-						=htonl((int32_t)(slat*(double)coordScale));
+					/* Write out our pre-scaled and optionally
+					 * arcsecond-converted source lat/lon plus our elevation */
+					header[ichan].sourceLongOrX = htonl((int32_t)slon);
+					header[ichan].sourceLatOrY  = htonl((int32_t)slat);
 					header[ichan].sourceSurfaceElevation
-						=htonl((int32_t)selev);
+						= htonl((int32_t)selev);
 					/* No easy way to specify both elev and depth*/
 					header[ichan].sourceDepth=htonl(0);
 				}
@@ -979,7 +1258,7 @@ r
 			else
 			{
 				if(Verbose)
-					fprintf(stdout,"Station %s and channel %s skipped\n",
+					elog_notify(0,"Station %s and channel %s skipped\n",
 						sta,chan);
 			}
 
@@ -987,7 +1266,7 @@ r
 		/* Now we write the data */
 		for(i=0;i<nchan;++i)
 		{
-			if(fwrite((void *)(&(header[i])),sizeof(SegyHead),1,fp) != 1)
+			if(fwrite((void *)(&(header[i])),sizeof(SEGYTraceHeader),1,fp) != 1)
 				elog_die(0,"Write error on header for trace %d\n",total_traces+i);
 			if(fwrite((void *)traces[i],sizeof(float),
 					(size_t)nsamp0,fp) != nsamp0)
@@ -1000,4 +1279,3 @@ r
 	}
 	return 0 ;
 }
-
