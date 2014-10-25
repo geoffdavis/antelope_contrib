@@ -38,9 +38,7 @@ Updated: 2014 with SEGY Rev1 compatibility
 #include "pf.h"
 #include "elog.h"
 #include "segy.h"
-#include "location.h"
 #include "deviants.h"
-#include <arpa/inet.h>
 #define min(a,b) ((a) <= (b) ? (a) : (b))
 /* Newer compilers will complain if these prototypes are not defined.
 Could be placed in segy.y, but that would strike me as mysterious. */
@@ -935,11 +933,8 @@ int main(int argc, char **argv)
 
 	/* memory allocation for trace data.  This is a large matrix
 	that is cleared for each event.  This model works because of
-	segy's fixed length format.  This routine is a descendent of
-	numerical recipes routine found in libgenloc.  This is not
-	the most efficient way to do this, but it simplifies the
-	algorithm a lot. */
-	traces = matrix(0, nchan, htonf(0), nsamp0);
+	segy's fixed length format.*/
+    traces = calloc(nchan * nsamp0, sizeof(float));
 	if(traces == NULL)
 		elog_die(0,"Cannot alloc trace data matrix work space of size %d by %d\n",
 			nchan, nsamp0);
