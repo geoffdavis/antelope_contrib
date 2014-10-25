@@ -805,7 +805,7 @@ int main(int argc, char **argv)
 	tlength = pfget_double(pf,"trace_length");
 	nsamp0 = (int)(tlength*samprate0);
 	use_32bit_nsamp=pfget_boolean(pf,"use_32bit_nsamp");
-	if (ntohs(segy_format) >= 0x0100) {
+	if (ntohs(segy_format) >= 0x0100 && use_32bit_nsamp) {
 		elog_complain(0,"The 32-bit extension field is incompatible with SEG-Y REV 1. Ignoring 'use_32bit_nsamp' from the parameter file");
 		use_32bit_nsamp=0;
 	}
@@ -934,10 +934,15 @@ int main(int argc, char **argv)
 	/* memory allocation for trace data.  This is a large matrix
 	that is cleared for each event.  This model works because of
 	segy's fixed length format.*/
-    traces = calloc(nchan * nsamp0, sizeof(float));
+	traces = calloc(nchan, sizeof(float*));
 	if(traces == NULL)
-		elog_die(0,"Cannot alloc trace data matrix work space of size %d by %d\n",
-			nchan, nsamp0);
+		elog_die(1,"out of memory");
+	for (int r = 0; r < nchan; r++)
+	{
+		traces[r] = calloc(nsamp0, sizeof(float));
+		if(traces[r] == NULL)
+			elog_die(1,"out of memory");
+	}
 	header = (SEGYTraceHeader *)calloc((size_t)nchan,sizeof(SEGYTraceHeader));
 	if(header == NULL)
 			elog_die(0,"Cannot alloc memory for %d segy header workspace\n",nchan);
