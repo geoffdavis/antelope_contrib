@@ -5,10 +5,13 @@ from pydbwfserver.resource import FaviconResource, QueryParserResource
 from twisted.application import internet, service
 from twisted.python.log import ILogObserver, PythonLoggingObserver
 from twisted.web import server, static
+from twisted.web.vhost import VHostMonsterResource
 
 for port, db in config.run_server.items():
 
     root = QueryParserResource(config, db)
+
+    root.putChild(b"vhost", VHostMonsterResource())
 
     root.putChild(b"static", static.File(config.static_dir))
 
