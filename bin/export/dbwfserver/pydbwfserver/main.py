@@ -33,7 +33,7 @@ def system_print():
     print("processor:", platform.processor())
 
 
-def main():
+def main(argv):
     """
     Run the twisted reactor, overriding the twistd class with new args.
 
@@ -56,6 +56,7 @@ def main():
     logger = logging.getLogger("pydbwfserver")
 
     # Configure system with command-line flags and pf file values.
+    config.opts = argv[1:]
     sys.argv = config.configure()
 
     if config.verbose:
@@ -67,3 +68,7 @@ def main():
     logger.info("Start Server!")
 
     run()
+
+
+if __name__ == "__main__":
+    exit(main(sys.argv))

@@ -86,8 +86,9 @@ class ProgressLogger:
 
 
 def load_template(template_path):
-    """Load a template from the specified path."""
-    return Template(open(template_path).read())
+    """Load a template from a specified file."""
+    with open(template_path, "r") as opened_file:
+        return Template(opened_file.read())
 
 
 def str2bool(test: str) -> bool:

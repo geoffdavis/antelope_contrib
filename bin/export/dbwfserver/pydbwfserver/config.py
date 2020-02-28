@@ -2,6 +2,7 @@
 from getopt import GetoptError, getopt
 import os
 import sys
+from typing import Union
 
 from antelope import stock
 
@@ -24,8 +25,11 @@ class DbwfserverConfig:
 
     """
 
-    def __init__(self):
+    def __init__(self, opts: Union[list, None] = None):
         """Initialize the DbwfserverConfig object."""
+        if opts is None:
+            opts = []
+        self.opts = opts
         self.event = "false"
         self.pfname = "dbwfserver"
         self.nickname = ""
@@ -41,7 +45,7 @@ class DbwfserverConfig:
     def configure(self):
         """Parse argments, read parameter file, and fix up options before handing configuration off to Twistd."""
         try:
-            opts, pargs = getopt(sys.argv[1:], "dp:P:vVern:")
+            opts, pargs = getopt(self.opts, "dp:P:vVern:")
         except GetoptError:
             usage()
             sys.exit(-1)
