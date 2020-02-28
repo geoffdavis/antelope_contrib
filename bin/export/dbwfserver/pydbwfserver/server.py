@@ -1,4 +1,13 @@
-"""main server resource for pydbwfserver."""
+"""main server resource for pydbwfserver.
+
+This resource sets up a service collection of multiple running instances of the dbwfserver.
+
+Notably, it also includes support for placing the daemon behind a reverse proxy server,
+with a resource titled "vhost" at the root level of each application instance.
+
+For more information, see:
+https://twistedmatrix.com/documents/15.0.0/web/howto/using-twistedweb.html#using-vhostmonster
+"""
 
 from pydbwfserver.main import config
 from pydbwfserver.resource import FaviconResource, QueryParserResource
