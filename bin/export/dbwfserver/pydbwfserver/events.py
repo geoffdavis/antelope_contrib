@@ -2,10 +2,10 @@
 from collections import defaultdict
 import logging
 
-from config import DbwfserverConfig
-from dbcentral import Dbcentral, DbNulls
-
 from antelope import datascope, stock
+
+from .config import DbwfserverConfig
+from .dbcentral import Dbcentral, DbNulls
 
 
 class Events:

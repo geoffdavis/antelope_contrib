@@ -5,11 +5,12 @@ import re
 import sys
 import time
 
-from dbcentral import Dbcentral
 from twisted.internet import reactor
-from util import ProgressLogger
 
 from antelope import datascope, stock
+
+from .dbcentral import Dbcentral
+from .util import ProgressLogger
 
 
 class Stations:

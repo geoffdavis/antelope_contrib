@@ -53,24 +53,14 @@ from collections import defaultdict
 import glob
 import logging
 import os
-import signal
 import sys
 
 from six import string_types
 import twisted
-from util import logger
 
 from antelope import datascope, stock
 
-if __name__ == "__main__":
-    # Conditionally add in paths for finding antelope modules
-    """
-    Test the class
-    """
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-
-    sys.path.append(os.environ["ANTELOPE"] + "/data/python")
-    sys.path.append(os.environ["ANTELOPE"] + "contrib/data/python")
+logger = logging.getLogger(__name__)
 
 
 class DbcentralException(Exception):
@@ -177,15 +167,15 @@ class Dbcentral:
         """Duplicate self."""
         format_string = (
             "{classname}(dbname={dbname}, nickname={nickname}, debug={debug},"
+            + " required_tables={required_tables}, type={type}, dbs={dbs})"
         )
-        " required_tables={required_tables}, type={type}, dbs={dbs})"
 
         return format_string.format(
             classname=self.__class__.__name__,
             dbname=self.path,
             nickname=self.nickname,
             debug=self.debug,
-            required_tables=",".join(self.required_tables.join),
+            required_tables=",".join(self.required_tables),
             type=self.type,
             dbs=",".join(self.dbs),
         )
@@ -461,45 +451,6 @@ class Dbcentral:
             del self.dbs[tbl]
         except ValueError:
             pass
-
-
-def main():
-    """Run tests on the Antelope demo database.
-
-    This test function will run if the file is called directly
-
-    Opens the Antelope demo database and runs some tests on it
-    """
-    import logging
-    from pprint import pprint
-
-    logging.basicConfig()
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-
-    time = 1262404000.00000
-
-    dbcntl = Dbcentral(
-        "/opt/antelope/data/db/demo/demo",
-        debug=True,
-        required_tables=["wfdisc", "stachan"],
-    )
-
-    print("dbcntl.__repr__() = %r" % dbcntl)
-    pprint(dbcntl, indent=10, width=1, depth=1)
-    pprint(dbcntl.dbs, indent=10, width=1, depth=None)
-    print("dbcntl.str__() is %s" % dbcntl)
-    print("dbcntl(%s) == %s" % (time, dbcntl(time)))
-    try:
-        dbcntl.purge("test")
-    except Exception as e:
-        logger.info("dbcntl.purge(%s) => %s" % ("test", e))
-
-    print("Done with Dbcentral demo.")
-
-
-if __name__ == "__main__":
-    main()
 
 
 class DbNulls:
