@@ -1,6 +1,7 @@
 """Test cases for the resource module."""
 import os
 import unittest
+from unittest.mock import Mock
 
 from pydbwfserver.config import DbwfserverConfig
 from pydbwfserver.resource import FaviconResource, QueryParserResource
@@ -32,10 +33,31 @@ class TestQueryParserResource(unittest.TestCase):
         self.config = DbwfserverConfig([self.test_db])
         self.config.configure()
         self.subject = QueryParserResource(self.config, self.test_db)
+        self.subject._init_in_thread()
+        self.request = Mock()
+        self.request.prepath = [b"", b"foo", b"bar", b"", b"baz", b"qux"]
+        self.request.args = {}
 
     def testInit(self):
         """Verify that the query parser resource instantiates as a resource."""
         self.assertIsInstance(self.subject, Resource)
+        self.assertIsNotNone(self.subject.dbcentral)
+
+    def testChild(self):
+        """Verify that this resource breaks the Twisted resource parsing model.
+
+        NOTE: This resource does too many things and should be broken up.
+        """
+        self.assertEqual(self.subject, self.subject.getChild("foo", self.request))
+
+    def test_loading(self):
+        """Test the loading page."""
+        self.assertIsNotNone(self.subject._render_loading(self.request))
+
+    def test_render_uri(self):
+        """Test render_uri callback."""
+
+        self.assertIsNone(self.subject.render_uri(self.request))
 
 
 if __name__ == "__main__":

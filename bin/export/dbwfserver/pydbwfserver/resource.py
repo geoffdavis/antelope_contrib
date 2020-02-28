@@ -15,11 +15,13 @@ import socket
 from string import Template
 import sys
 from textwrap import dedent
+from typing import List
 
 import six
 import twisted.internet.defer
 import twisted.internet.reactor
 from twisted.internet.threads import deferToThread
+from twisted.web.http import Request
 import twisted.web.resource
 import twisted.web.server
 import twisted.web.static
@@ -56,7 +58,7 @@ class QueryParserResource(twisted.web.resource.Resource):
 
     allowedMethods = "GET"
 
-    def __init__(self, config: DbwfserverConfig, dbname):
+    def __init__(self, config: DbwfserverConfig, dbname: str):
         """Initialize the QueryParserResource class."""
 
         self.logger = logging.getLogger(__name__)
@@ -161,13 +163,13 @@ class QueryParserResource(twisted.web.resource.Resource):
 
         self.logger.info("READY!")
 
-    def getChild(self, name, request):
-        """Get the child process."""
+    def getChild(self, name, request: Request):
+        """Return self as the child resource for any subpath."""
 
         self.logger.debug("getChild(): name:%s request:%s" % (name, request))
         return self
 
-    def _render_loading(self, request):
+    def _render_loading(self, request: Request):
         """Output an error page while loading Stations and Events."""
 
         response_code = 503
@@ -195,7 +197,7 @@ class QueryParserResource(twisted.web.resource.Resource):
             loading_events=self.loading_events,
         )
 
-        request.setHeader("content-type", "text/html")
+        request.setHeader(b"content-type", b"text/html")
         request.setResponseCode(response_code)
         self.logger.debug("_render_loading returning: \n" + html)
         return html.encode()
@@ -232,7 +234,7 @@ class QueryParserResource(twisted.web.resource.Resource):
 
         return twisted.web.server.NOT_DONE_YET
 
-    def render_uri(self, request):
+    def render_uri(self, request: Request) -> None:
         """Handle a generic request."""
 
         #
@@ -326,7 +328,7 @@ class QueryParserResource(twisted.web.resource.Resource):
         )
         self.logger.debug("QueryParser(): render_uri() query => [%s]" % query)
 
-        if query["data"] is True:
+        if "data" in query and query["data"] is True:
 
             self.logger.debug('QueryParser(): render_uri() "data" query')
 
@@ -490,7 +492,10 @@ class QueryParserResource(twisted.web.resource.Resource):
 
         if request.args is not None:
             decoded_args = {
-                k.decode(): [vv.decode() for vv in v] for k, v in request.args.items()
+                k.decode()
+                if isinstance(k, bytes)
+                else k: [vv.decode() if isinstance(vv, bytes) else vv for vv in v]
+                for k, v in request.args.items()
             }
             response_meta["setupUI"] = json.dumps(decoded_args)
 
@@ -508,7 +513,7 @@ class QueryParserResource(twisted.web.resource.Resource):
 
         return self.uri_results(request, "Invalid query.")
 
-    def _parse_request(self, args):
+    def _parse_request(self, args: List[bytes]):
         """
         Parse a request, acting as our own resource mapper.
 
@@ -540,7 +545,9 @@ class QueryParserResource(twisted.web.resource.Resource):
             uri["data"] = True
             args.remove(b"data")
 
-        self.logger.debug("Query args(%d): %s", len(args), ",".join(args))
+        self.logger.debug(
+            "Query args(%d): %s", len(args), ",".join([a.decode() for a in args])
+        )
 
         # localhost/sta
         uri["sta"] = args[1].decode() if len(args) > 1 else []
@@ -634,7 +641,7 @@ class QueryParserResource(twisted.web.resource.Resource):
 
         return uri
 
-    def uri_results(self, uri=None, results=None):
+    def uri_results(self, uri=None, results=None) -> None:
         """Return the results of a query to a particular URI."""
         self.logger.info("QueryParser(): uri_results(%s,%s)" % (uri, type(results)))
 
