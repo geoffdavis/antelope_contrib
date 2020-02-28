@@ -136,7 +136,6 @@ class DbNulls:
         """Intercept requests."""
 
         if element is None:
-
             self.logger.error("No element named (%s) in object." % element)
             return
 
@@ -189,7 +188,6 @@ class DbNulls:
             else:
 
                 for field in db.query(datascope.dbTABLE_FIELDS):
-
                     self.null_vals[field] = db.getv(field)[0]
 
                     self.logger.debug(
@@ -462,7 +460,6 @@ class Stations:
                 if sta in self.stachan_cache:
 
                     for ch in self.stachan_cache[sta]:
-
                         chans[ch] = 1
                 else:
 
@@ -472,7 +469,6 @@ class Stations:
             for st in self.stachan_cache.keys():
 
                 for ch in self.stachan_cache[st]:
-
                     chans[ch] = 1
 
         return list(chans.keys())
@@ -824,17 +820,17 @@ class Events:
                 else:
                     nass = "%d" % nass
 
-                self.event_cache[orid] = {
-                    "time": time,
-                    "lat": lat,
-                    "lon": lon,
-                    "depth": depth,
-                    "auth": auth,
-                    "mb": mb,
-                    "ms": ms,
-                    "ml": ml,
-                    "nass": nass,
-                }
+                self.event_cache[orid] = defaultdict(
+                    time=time,
+                    lat=lat,
+                    lon=lon,
+                    depth=depth,
+                    auth=auth,
+                    mb=mb,
+                    ms=ms,
+                    ml=ml,
+                    nass=nass,
+                )
 
                 if mb > 0:
                     self.event_cache[orid]["magnitude"] = mb
@@ -924,3 +920,37 @@ class Events:
         self.logger.debug("Events: phases(): t1=%s t2=%s [%s]" % (min, max, phases))
 
         return dict(phases)
+
+
+def str2bool(test: str) -> bool:
+    """Get a boolean value from an input string.
+
+    The following case in-sensitive values are treated as True:
+    * "yes"
+    * "y"
+    * "true"
+    * "t"
+    * "1"
+
+    The following case in-sensitive values are treated as False:
+    * "no"
+    * "n"
+    * "false"
+    * "f"
+    * "0"
+
+    Raises:
+        ValueError if test is not one of the above values
+
+    """
+    try:
+        test = test.lower()
+    except AttributeError:
+        pass
+    else:
+        if test.lower() in ("yes", "y", "true", "t", "1"):
+            return True
+        elif test.lower() in ("no", "n", "false", "f", "0"):
+            return False
+
+    raise ValueError("%s could not be interpreted as a boolean.", test)

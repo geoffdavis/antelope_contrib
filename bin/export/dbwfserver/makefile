@@ -11,5 +11,9 @@ UNINSTALL = $(ANTELOPE)$(SUBDIR)/data/$(DATADIR)/*.pyc $(ANTELOPE)$(SUBDIR)/data
 
 include $(ANTELOPEMAKE)
 
+test: install
+	pfverify -v
+	python -m unittest discover -s test_dbwfserver
+
 DIRS  = Contents
 DIRS += pydbwfserver
