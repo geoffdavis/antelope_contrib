@@ -25,10 +25,46 @@ class DbwfserverConfig:
 
     """
 
+    _my_attrs = (
+        "event",
+        "pfname",
+        "nickname",
+        "style",
+        "application_title",
+        "static_dir",
+        "jquery_dir",
+        "template",
+        "plot_template",
+        "local_data",
+        "antelope",
+        "proxy_url",
+        "port",
+        "max_points",
+        "max_traces",
+        "apply_calib",
+        "display_tracebacks",
+        "display_arrivals",
+        "display_points",
+        "verbose",
+        "debug",
+        "daemonize",
+        "default_time_window",
+        "filters",
+        "run_server",
+        "realtime",
+    )
+
     def __init__(self, opts: Union[list, None] = None):
         """Initialize the DbwfserverConfig object."""
+
         if opts is None:
             opts = []
+
+        # Initialize object instance variables with None.
+        for a in self.__class__._my_attrs:
+            self.__dict__[a] = None
+
+        # Set our instance defaults.
         self.opts = opts
         self.event = "false"
         self.pfname = "dbwfserver"
@@ -51,7 +87,6 @@ class DbwfserverConfig:
             sys.exit(-1)
 
         if len(pargs) == 1:
-
             self.dbname = pargs[0]
 
         for option, value in opts:
@@ -161,69 +196,3 @@ class DbwfserverConfig:
         argv_remap.append(pid_path + "/dbwfserver_" + str(os.getpid()) + ".pid")
 
         return argv_remap
-
-    # }}}
-
-    def __getattr__(self, attrname):
-        """Return various internal state items."""
-        if attrname == "event":
-            return self.event
-        if attrname == "pfname":
-            return self.pfname
-        if attrname == "nickname":
-            return self.nickname
-        if attrname == "style":
-            return self.style
-        if attrname == "application_title":
-            return self.application_title
-        if attrname == "static_dir":
-            return self.static_dir
-        if attrname == "jquery_dir":
-            return self.jquery_dir
-        if attrname == "template":
-            return self.template
-        if attrname == "plot_template":
-            return self.plot_template
-        if attrname == "local_data":
-            return self.local_data
-        if attrname == "antelope":
-            return self.antelope
-        if attrname == "proxy_url":
-            return self.proxy_url
-        if attrname == "port":
-            return self.port
-        if attrname == "max_points":
-            return self.max_points
-        if attrname == "max_traces":
-            return self.max_traces
-        if attrname == "apply_calib":
-            return self.apply_calib
-        if attrname == "display_tracebacks":
-            return self.display_tracebacks
-        if attrname == "display_arrivals":
-            return self.display_arrivals
-        if attrname == "display_points":
-            return self.display_points
-        if attrname == "verbose":
-            return self.verbose
-        if attrname == "debug":
-            return self.debug
-        if attrname == "daemonize":
-            return self.daemonize
-        if attrname == "default_time_window":
-            return self.time_window
-        if attrname == "filters":
-            return self.filters
-        if attrname == "run_server":
-            return self.run_server
-        if attrname == "realtime":
-            return self.realtime
-        raise (AttributeError, attrname)
-
-    def __setattr__(self, attr, value):
-        """Modify internal state attributes."""
-
-        try:
-            self.__dict__[attr] = value
-        except Exception:
-            raise (AttributeError, attr + " not allowed")
