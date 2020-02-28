@@ -49,6 +49,7 @@ self.type to "dbcentral".
      element.purge(db)
 """
 
+from collections import defaultdict
 import glob
 import logging
 import os
@@ -56,6 +57,8 @@ import signal
 import sys
 
 from six import string_types
+import twisted
+from util import logger
 
 from antelope import datascope, stock
 
@@ -497,3 +500,106 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+class DbNulls:
+    """Stores null values for every field in the schema."""
+
+    def __init__(self, config, db, tables=None):
+        """
+        Load class and test databases.
+
+        This should be a dbcentral object
+        """
+
+        if tables is None:
+            tables = []
+        self.dbcentral = db
+        self.tables = tables
+        self.debug = config.debug
+        self.null_vals = defaultdict(lambda: defaultdict(dict))
+        self.logger = logging.getLogger(__name__)
+
+        # Load values from databases
+        self._get_nulls()
+
+    def __str__(self):
+        """Nicely print values.
+
+        end-user/application display of content using log.msg() or log.msg()
+        """
+        text = "Null values for databases: %s" % self.dbcentral.list()
+
+        for value in self.null_vals.keys():
+            text += "\t%s: %s" % (value, self.null_vals[value])
+
+        return text
+
+    def __call__(self, element=None):
+        """Intercept requests."""
+
+        if element is None:
+            self.logger.error("No element named (%s) in object." % element)
+            return
+
+        if element in self.null_vals:
+
+            return self.null_vals[element]
+
+        else:
+
+            self.logger.error("No value for element (%s)" % element)
+            return
+
+    def _get_nulls(self):
+        """
+        Private function to load values from dbs.
+
+        Go through the tables on the database and return
+        dictionary with NULL values for each field.
+
+        This method assumes all databases have the same schema.
+        """
+
+        # Get the first only.
+        dbname = self.dbcentral.list()[0]
+
+        try:
+            db = datascope.dbopen(dbname, "r")
+
+        except Exception as e:
+            logger.exception("dbopen(%s)=>(%s)" % (dbname, e))
+            sys.exit(twisted.internet.reactor.stop())
+
+        self.logger.debug("Looking for tables: %s" % self.tables)
+
+        # Loop over all tables
+        for table in db.query(datascope.dbSCHEMA_TABLES):
+
+            if len(self.tables) > 0 and table not in self.tables:
+                continue
+
+            self.logger.debug("Test table: [%s]" % table)
+
+            db = db.lookup("", table, "", "dbNULL")
+
+            # Test every field
+            try:
+                db.query(datascope.dbTABLE_FIELDS)
+            except datascope.DatascopeException:
+                pass
+
+            else:
+
+                for field in db.query(datascope.dbTABLE_FIELDS):
+                    self.null_vals[field] = db.getv(field)[0]
+
+                    self.logger.debug(
+                        "table:[%s] field(%s):[%s]"
+                        % (table, field, self.null_vals[field])
+                    )
+
+        try:
+            db.close()
+        except datascope.DatascopeException:
+            pass

@@ -5,13 +5,13 @@ import os
 import platform
 import sys
 
-import pydbwfserver.config as configuration
+from pydbwfserver.config import DbwfserverConfig
 from twisted.scripts.twistd import run
 
-logging.basicConfig()
+logger = logging.basicConfig()
 
 # Necessary for overriding the twisted run function.
-config = None
+config = DbwfserverConfig()
 
 
 def system_print():
@@ -56,7 +56,6 @@ def main():
     logger = logging.getLogger("pydbwfserver")
 
     # Configure system with command-line flags and pf file values.
-    config = configuration.DbwfserverConfig()
     sys.argv = config.configure()
 
     if config.verbose:

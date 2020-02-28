@@ -10,6 +10,7 @@ pydbwfserver application
 import json
 import logging
 import os
+from pprint import pformat
 import socket
 from string import Template
 import sys
@@ -25,8 +26,11 @@ import twisted.web.static
 
 from antelope import stock
 
+from .config import DbwfserverConfig
 from .dbcentral import Dbcentral
-from .util import Events, Stations, load_template
+from .events import Events
+from .stations import Stations
+from .util import load_template, str2bool
 
 
 class FaviconResource(twisted.web.static.File):
@@ -52,7 +56,7 @@ class QueryParserResource(twisted.web.resource.Resource):
 
     allowedMethods = "GET"
 
-    def __init__(self, config, dbname):
+    def __init__(self, config: DbwfserverConfig, dbname):
         """Initialize the QueryParserResource class."""
 
         self.logger = logging.getLogger(__name__)
@@ -252,14 +256,23 @@ class QueryParserResource(twisted.web.resource.Resource):
 
         #
         # remove all empty  elements
-        # This (localhost:8008/stations/) is the same as # (localhost:8008/stations)
+        #
+        # Thus, the following:
+        #     localhost:8008/stations/)
+        # is the same as
+        #     localhost:8008/stations
+        #
+        # This also means that:
+        #      localhost:8008/stations/foo///baz//1
+        # is the same as:
+        #      localhost:8008/stations/foo/baz/1
         #
         path = request.prepath
         # print("Hello, world! I am located at %r." % (request.prepath))
         while True:
             try:
                 path.remove(b"")
-            except Exception:
+            except ValueError:
                 break
 
         # Parse all elements on the station_patterns
@@ -276,8 +289,7 @@ class QueryParserResource(twisted.web.resource.Resource):
             query.update({"period": 0})
 
         if b"median" in request.args:
-            test = request.args[b"median"][0].decode()
-            if test.lower() in ("yes", "true", "t", "1"):
+            if str2bool(request.args[b"median"][0].decode()):
                 query.update({"median": 1})
             else:
                 query.update({"median": 0})
@@ -285,8 +297,7 @@ class QueryParserResource(twisted.web.resource.Resource):
             query.update({"median": 0})
 
         if b"realtime" in request.args:
-            test = request.args[b"realtime"][0].decode()
-            if test.lower() in ("yes", "true", "t", "1"):
+            if str2bool(request.args[b"realtime"][0].decode()):
                 query.update({"realtime": 1})
             else:
                 query.update({"realtime": 0})
@@ -409,9 +420,9 @@ class QueryParserResource(twisted.web.resource.Resource):
 
                 if len(path) == 2:
                     stas = self.stations.convert_sta(path[1].decode().split("|"))
-                    return self.uri_results(request, self.stations.channels(stas))
+                    return self.uri_results(request, self.stations.get_channels(stas))
 
-                return self.uri_results(request, self.stations.channels())
+                return self.uri_results(request, self.stations.get_channels())
 
             elif path[0] == b"now":
 
@@ -521,51 +532,37 @@ class QueryParserResource(twisted.web.resource.Resource):
 
         self.logger.debug("QueryParser(): _parse_request(): URI: %s" % str(args))
 
-        uri = {}
         time_window = float(self.config.default_time_window)
-
-        uri.update(
-            {
-                "sta": [],
-                "chan": [],
-                "end": 0,
-                "data": False,
-                "start": 0,
-                "page": 1,
-                "coverage": 0,
-                "time_window": False,
-            }
-        )
+        uri = {"time_window": time_window, "coverage": 0}
 
         if b"data" in args:
             self.logger.info("QueryParser() _parse_request(): data query!")
             uri["data"] = True
             args.remove(b"data")
 
+        self.logger.debug("Query args(%d): %s", len(args), ",".join(args))
+
         # localhost/sta
-        if len(args) > 1:
-            uri["sta"] = args[1].decode()
+        uri["sta"] = args[1].decode() if len(args) > 1 else []
 
         # localhost/sta/chan
-        if len(args) > 2:
-            uri["chan"] = args[2].decode()
+        uri["chan"] = args[2].decode() if len(args) > 2 else []
 
         # localhost/sta/chan/time
-        if len(args) > 3:
-            uri["start"] = args[3].decode()
+        uri["start"] = args[3].decode() if len(args) > 3 else None
 
         # localhost/sta/chan/time/time
-        if len(args) > 4:
-            uri["end"] = args[4].decode()
+        uri["end"] = args[4].decode() if len(args) > 4 else None
 
         # localhost/sta/chan/time/time/page
-        if len(args) > 5:
-            uri["page"] = args[5].decode()
+        uri["page"] = args[5].decode() if len(args) > 5 else 1
+
+        self.logger.debug("uri: %s", pformat(uri))
 
         #
         # Fix start, and sanitize bad values while we're at it.
         #
-        if "start" in uri and uri["start"] is not None:
+        if uri["start"] is not None:
             if uri["start"] == "hour":
                 uri["start"] = 0
                 time_window = 3600
@@ -585,12 +582,12 @@ class QueryParserResource(twisted.web.resource.Resource):
                     self.logger.warning(
                         "Invalid value '%s' for start time received.", uri["start"]
                     )
-                    uri["start"] = 0
+                    uri["start"] = None
 
         #
         # Fix end, and sanitize bad values while we're at it.
         #
-        if "end" in uri and uri["end"] is not None:
+        if uri["end"] is not None:
             if uri["end"] == "hour":
                 uri["end"] = 0
                 time_window = 3600
@@ -616,11 +613,18 @@ class QueryParserResource(twisted.web.resource.Resource):
         # Build missing times if needed
         #
         if uri["sta"] and uri["chan"]:
-            if not uri["start"]:
-                uri["end"] = self.stations.max_time()
-                uri["start"] = uri["end"] - time_window
+            if uri["start"] is None:
+                end_v = self.stations.max_time()
+                start_v = end_v - time_window
+                self.logger.debug(
+                    "No valid start time. Forcing start and end times to %d, %d",
+                    start_v,
+                    end_v,
+                )
+                uri["end"] = end_v
+                uri["start"] = start_v
 
-            if not uri["end"]:  # should handle both None and 0
+            if uri["end"] is None:  # should handle both None and 0
                 uri["end"] = uri["start"] + time_window
 
         self.logger.debug(

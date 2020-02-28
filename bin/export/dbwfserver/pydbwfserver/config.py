@@ -1,5 +1,5 @@
 """Model pydbwfserver configuration."""
-import getopt
+from getopt import GetoptError, getopt
 import os
 import sys
 
@@ -16,7 +16,13 @@ def usage():
 
 
 class DbwfserverConfig:
-    """Object to hold the pydbwfserver configuration."""
+    """Object to hold the pydbwfserver configuration.
+
+    Usage:
+        config = DbwfserverConfig()
+        config.configure()
+
+    """
 
     def __init__(self):
         """Initialize the DbwfserverConfig object."""
@@ -32,9 +38,11 @@ class DbwfserverConfig:
         self.daemonize = False
         self.run_server = {}
 
+    def configure(self):
+        """Parse argments, read parameter file, and fix up options before handing configuration off to Twistd."""
         try:
-            opts, pargs = getopt.getopt(sys.argv[1:], "dp:P:vVern:")
-        except getopt.GetoptError:
+            opts, pargs = getopt(sys.argv[1:], "dp:P:vVern:")
+        except GetoptError:
             usage()
             sys.exit(-1)
 
@@ -95,7 +103,6 @@ class DbwfserverConfig:
         self.default_time_window = pf.get("default_time_window", -1)
         self.filters = list(pf.get("filters", []))
 
-    def configure(self):
         """Fix paths and sanity check arguments before handoff to Twisted."""
         #
         # Fix paths
