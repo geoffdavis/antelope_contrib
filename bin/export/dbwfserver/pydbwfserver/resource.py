@@ -78,16 +78,30 @@ class QueryParserResource(twisted.web.resource.Resource):
         self.root_template = load_template(self.config.template)
         self.plot_template = load_template(self.config.plot_template)
 
-        #
-        # Initialize Classes
-        #
         self.logger.debug(
             "QueryParser(): Init DB: Load class twisted.web.resource.Resource.__init__(self)"
         )
         twisted.web.resource.Resource.__init__(self)
 
+        d = deferToThread(self._init_in_thread)
+        d.addCallback(self._init_finished)
+        d.addErrback(self._init_failed)
+
+    def _init_finished(self, d):
+        """Mark initialization as finished."""
+        self.init_finished = True
+
+    def _init_failed(self, failure):
+        """Handle initialization failures."""
+        self.init_failure = True
+        self.logger.critical("An error occurred during initialization: " + str(failure))
+        sys.exit(twisted.internet.reactor.stop())
+
+    def _init_in_thread(self):
+        """Run Initialization within a new thread."""
+
         #
-        # Open db using Dbcentral CLASS
+        # Open db using Dbcentral
         #
         self.logger.debug(
             "QueryParser(): Init DB: Create Dbcentral object with database(%s)."
@@ -130,23 +144,6 @@ class QueryParserResource(twisted.web.resource.Resource):
                 "No valid databases to work with! -v or -V for more info"
             )
             return
-
-        d = deferToThread(self._init_in_thread)
-        d.addCallback(self._init_finished)
-        d.addErrback(self._init_failed)
-
-    def _init_finished(self, d):
-        """Mark initialization as finished."""
-        self.init_finished = True
-
-    def _init_failed(self, failure):
-        """Handle initialization failures."""
-        self.init_failure = True
-        self.logger.critical("An error occurred during initialization: " + str(failure))
-        sys.exit(twisted.internet.reactor.stop())
-
-    def _init_in_thread(self):
-        """Run Initialization within a new thread."""
 
         self.logger.info("Loading Stations()")
         self.stations = Stations(self.config, self.dbcentral)
